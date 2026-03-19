@@ -1,107 +1,38 @@
-# Extensión: Copiar número de WhatsApp
+# ⚡ WhatsApp Web - Contact Extractor
 
-Una extensión para **Google Chrome (Manifest V3)** que permite copiar de forma rápida el **número o nombre de contacto** desde **WhatsApp Web**, abrirlo en **Google Contacts** o simplemente guardarlo en el portapapeles.  
-Además, puedes activar estas funciones mediante **atajos de teclado personalizados**.
+Una extensión robusta para Google Chrome que te permite extraer con un clic los números telefónicos y nombres de tus chats de WhatsApp Web, de forma rápida e indetectable.
 
----
-
-## Características principales
-
-- Copia automáticamente el **número de teléfono** visible en el chat de WhatsApp Web.
-- Copia el **nombre del contacto** cuando no hay número disponible.
-- Abre el contacto directamente en [Google Contacts](https://contacts.google.com/).
-- Incluye **atajos de teclado configurables** (por defecto):
-  - `Ctrl + Espacio` → Abre el popup de la extensión.
-  - `Ctrl + Shift + C` → Copia el número automáticamente sin abrir el popup.
-  - `Ctrl + Shift + X` → Ejecuta el script `content.js` (abrir panel de contactos).
+## 🚀 Características
+- **Extracción Inteligente:** Reconoce números de teléfono en contexto E.164 universal (+ XX XXX XXXX) en el chat con los que te comuniques, incluso si es un perfil de WhatsApp Business.
+- **Resistente a actualizaciones:** A diferencia de otras extensiones, no depende de selectores CSS frágiles ni de posiciones complejas en el código (que cambian constantemente). Utiliza búsquedas matemáticas en la interfaz (Regex y Coordenadas) para garantizar que seguirá funcionando por meses.
+- **Trazabilidad Oculta:** La extensión abre milimétricamente la Información del Contacto y la vuelve a cerrar tan rápido que casi ni te percatas.
+- **Integración con Google Contacts:** Abre en otra pestaña un formulario en Google listo para añadir a la persona a tu lista de contactos en un solo clic.
 
 ---
 
-## Estructura del proyecto
+## ⚙️ Instalación Fácil
 
-```
-Copiar-numero-WhatsApp
-├── background.js       # Service Worker: escucha los comandos y ejecuta los scripts
-├── content.js          # Abre Google Contacts con el número/nombre del chat
-├── copynumber.js       # Copia automáticamente el número del contacto
-├── copyname.js         # Copia el nombre del contacto
-├── popup.html          # Interfaz visual con botones para ejecutar las funciones
-├── popup.js            # Lógica de los botones del popup
-├── logo.png            # Icono de la extensión
-└── manifest.json       # Configuración del Manifest V3
-```
+1. Clona o descarga este proyecto en tu computador local.
+2. Abre Google Chrome y navega a `chrome://extensions/`.
+3. Activa el **"Modo de Desarrollador"** en la esquina superior derecha.
+4. Haz clic en el botón superior izquierdo **"Cargar descomprimida"** (Load unpacked).
+5. Selecciona la carpeta donde guardaste los archivos de la extensión.
+6. ¡Listo! Verás el icono de la extensión fijado en tu barra de tareas de Chrome.
 
 ---
 
-## Atajos de teclado (commands)
+## ⌨️ Atajos de Teclado y Uso Rápido
 
-Definidos en el `manifest.json`:
+La herramienta está pensada para la máxima velocidad del teclado. Si estás dentro de la pestaña de WhatsApp Web, puedes presionar:
 
-```json
-"commands": {
-  "_execute_action": {
-    "suggested_key": { "default": "Ctrl+Space" }
-  },
-  "copiar-numero-auto": {
-    "suggested_key": { "default": "Ctrl+Shift+C" },
-    "description": "Copiar número automáticamente en la pestaña activa"
-  },
-  "abrir-contactos": {
-    "suggested_key": { "default": "Ctrl+Shift+X" },
-    "description": "Ejecutar content.js para abrir Google Contacts"
-  }
-}
-```
+- **`Ctrl+Space`** (o `Cmd+Space` en Mac) ➔ Abre el menú flotante para hacer clic manual.
+- **`Ctrl+Shift+C`** (o `Cmd+Shift+C`) ➔ Copia silenciosamente el **número**. (Si tu computador tiene este atajo reservado, puedes cambiarlo en _`chrome://extensions/shortcuts`_).
+- **`Ctrl+Shift+X`** (o `Cmd+Shift+X`) ➔ Extrae el número y abre instantáneamente **Google Contacts**.
 
-> Si algún atajo aparece como _“No está configurado”_, se debe asignar manualmente desde  
-> `chrome://extensions/shortcuts`.
+_Nota: Estos atajos son configurables. Ve a [chrome://extensions/shortcuts](chrome://extensions/shortcuts) y ponle los atajos que a ti te gusten más._
 
 ---
 
-## Instalación manual
+## 🛠 Para Desarrolladores
 
-1. Descarga o clona este repositorio:
-   ```bash
-   git clone https://github.com/tuusuario/copiar-numero-whatsapp.git
-   ```
-2. Abre Chrome y entra en `chrome://extensions/`.
-3. Activa el **Modo desarrollador** (esquina superior derecha).
-4. Haz clic en **“Cargar sin empaquetar”** y selecciona la carpeta del proyecto.
-5. Listo ✅
-   - Verás el icono de la extensión en la barra.
-   - Puedes probarla directamente en [web.whatsapp.com](https://web.whatsapp.com).
-
----
-
-## Cómo usarla
-
-- Abre un chat en **WhatsApp Web**.
-- Usa alguno de los métodos:
-  - **Desde el popup:** haz clic en “Copiar número”, “Copiar nombre” o “Abrir contactos”.
-  - **Desde el teclado:**
-    - `Ctrl + Shift + 1` → Copia automáticamente el número.
-    - `Ctrl + Shift + X` → Abre el contacto en Google Contacts.
-    - `Ctrl + Espacio` → Abre el popup manual.
-
----
-
-## Notas técnicas
-
-- La extensión usa `chrome.scripting.executeScript` para inyectar los scripts en WhatsApp Web.
-- Se ejecuta bajo Manifest V3 con un **Service Worker** (`background.js`).
-- No recolecta ni transmite datos personales. Todo se procesa localmente en el navegador.
-- Compatible con **Windows, macOS y Linux**.
-
----
-
-## Autor
-
-**Juan Pablo Castaño Uribe**  
-_Extensión creada como utilidad personal para automatizar la gestión de contactos desde WhatsApp Web._
-
----
-
-## Licencia
-
-Este proyecto se distribuye bajo la licencia **MIT**.  
-Puedes usarlo, modificarlo y compartirlo libremente siempre que se mantenga la atribución al autor original.
+El código está estructurado para que sea fácil de mantener y leer. Para revisar cómo funciona internamente, entra y lee el archivo **`DEVELOPER_GUIDE.md`** recién incluido.

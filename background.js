@@ -18,4 +18,11 @@ chrome.commands.onCommand.addListener((command, tab) => {
       files: ["content.js"],
     });
   }
+
+  if (command === "buscar-elixir-auto") {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["buscarelixir.js"],
+    });
+  }
 });

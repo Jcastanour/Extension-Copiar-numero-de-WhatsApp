@@ -1,4 +1,7 @@
 // buscarelixir.js
+// 👇 Cambiar aquí cuando se tenga el dominio definitivo
+const ELIXIR_BASE_URL = "https://elixircuentas-prod.fly.dev/";
+
 function buscarEnElixir() {
   function cleanText(text) {
     if (!text) return "";
@@ -22,7 +25,7 @@ function buscarEnElixir() {
   }
 
   function abrirElixir(numero) {
-    const url = "https://elixircuentas-prod.fly.dev/?" +
+    const url = ELIXIR_BASE_URL + "?" +
                 new URLSearchParams({ q: numero }).toString();
     window.open(url, "_blank");
   }

@@ -1,6 +1,6 @@
 // buscarelixir.js
 // 👇 Cambiar aquí cuando se tenga el dominio definitivo
-const ELIXIR_BASE_URL = "https://elixircuentas-prod.fly.dev/";
+const ELIXIR_BASE_URL = "https://elixircuentas.com/";
 
 function buscarEnElixir() {
   function cleanText(text) {

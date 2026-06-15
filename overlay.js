@@ -155,6 +155,13 @@
       .copy { width:100%; background:#fff; color:#7c3aed; border:1px solid #ddd4ff; border-radius:8px; font-weight:600; font-size:12.5px; padding:7px; cursor:pointer; }
       .copy:hover { background:#f3f0ff; }
       .copy.done { background:#e7f7ee; color:#137a45; border-color:#bfe9cf; }
+      .pedir { width:100%; margin-top:6px; background:linear-gradient(135deg,#635bff,#8b5cf6); color:#fff; border:none; border-radius:8px; font-weight:600; font-size:12.5px; padding:7px; cursor:pointer; }
+      .pedir:hover { filter:brightness(1.05); }
+      .pedir:disabled { opacity:.7; cursor:default; }
+      .codigo { margin-top:6px; background:#0f172a; color:#fff; border-radius:8px; padding:7px 9px; font-family:ui-monospace,Menlo,monospace; font-size:13px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      .codigo b { font-size:15px; letter-spacing:1px; }
+      .codigo small { color:#cbd5e1; font-weight:400; }
+      .codigo .ccopy { background:rgba(255,255,255,.16); border:none; color:#fff; border-radius:6px; padding:3px 8px; font-size:11.5px; cursor:pointer; }
     </style>
     <button class="launcher" id="launcher" title="Mostrar cuentas Elixir" hidden>⚡</button>
     <div class="panel" id="panel">
@@ -179,6 +186,8 @@
   // ----- Estado persistido (chrome.storage.local) -----
   let enabled = true;
   let collapsed = false;
+  let tgEnabled = false;        // flag prototipo Telegram (Bloque 2)
+  let tgBot = "WolfStr_bot";    // bot por defecto
 
   function aplicarEstadoUI() {
     elLauncher.hidden = enabled;
@@ -208,6 +217,8 @@
             <span class="badge ${diasNeg ? "bad" : "ok"}">${escapeHtml(textoDias(acc.days_remaining))}</span>
           </div>
           <button class="copy" data-email="${escapeHtml(acc.provider_email || "")}">Copiar correo</button>
+          ${tgEnabled ? `<button class="pedir" data-email="${escapeHtml(acc.provider_email || "")}">📨 Pedir código (Telegram)</button>` : ""}
+          <div class="codigo-slot"></div>
         </div>`;
     }).join("");
     setBody(`<div class="num">📱 <b>${escapeHtml(numero)}</b> · ${ord.length} cuenta(s)</div>` + cards);
@@ -216,16 +227,55 @@
       btn.addEventListener("click", async () => {
         const email = btn.getAttribute("data-email");
         if (!email) return;
-        try { await navigator.clipboard.writeText(email); }
-        catch (e) {
-          const t = document.createElement("textarea");
-          t.value = email; document.body.appendChild(t); t.select();
-          document.execCommand("copy"); document.body.removeChild(t);
-        }
+        await copiar(email);
         const orig = btn.textContent;
         btn.textContent = "¡Copiado!"; btn.classList.add("done");
         setTimeout(() => { btn.textContent = orig; btn.classList.remove("done"); }, 1200);
       });
+    });
+
+    shadow.querySelectorAll(".pedir").forEach((btn) => {
+      btn.addEventListener("click", () => pedirCodigo(btn));
+    });
+  }
+
+  async function copiar(texto) {
+    try { await navigator.clipboard.writeText(texto); }
+    catch (e) {
+      const t = document.createElement("textarea");
+      t.value = texto; document.body.appendChild(t); t.select();
+      document.execCommand("copy"); document.body.removeChild(t);
+    }
+  }
+
+  // ----- Pedir código en Telegram (prototipo) -----
+  function pedirCodigo(btn) {
+    const email = btn.getAttribute("data-email");
+    if (!email) return;
+    const slot = btn.parentElement.querySelector(".codigo-slot");
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Enviando a Telegram…";
+    if (slot) slot.innerHTML = "";
+
+    chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot: tgBot }, (resp) => {
+      btn.disabled = false;
+      btn.textContent = orig;
+      if (chrome.runtime.lastError) { if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`; return; }
+      if (!resp) { if (slot) slot.innerHTML = `<div class="msg error">Sin respuesta.</div>`; return; }
+      if (!resp.ok) { if (slot) slot.innerHTML = `<div class="msg error">${escapeHtml(resp.error || "No se pudo.")}</div>`; return; }
+      if (!slot) return;
+      if (resp.codigo) {
+        slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>`;
+        slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+          await copiar(resp.codigo);
+          e.target.textContent = "✓";
+          setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+        });
+        copiar(resp.codigo); // copia automática
+      } else {
+        slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 80))}</small></div>`;
+      }
     });
   }
 
@@ -310,9 +360,11 @@
 
   // ----- Init -----
   try {
-    chrome.storage.local.get(["overlayEnabled", "overlayCollapsed"], (cfg) => {
+    chrome.storage.local.get(["overlayEnabled", "overlayCollapsed", "tgEnabled", "tgBot"], (cfg) => {
       if (cfg && typeof cfg.overlayEnabled === "boolean") enabled = cfg.overlayEnabled;
       if (cfg && typeof cfg.overlayCollapsed === "boolean") collapsed = cfg.overlayCollapsed;
+      if (cfg && typeof cfg.tgEnabled === "boolean") tgEnabled = cfg.tgEnabled;
+      if (cfg && typeof cfg.tgBot === "string" && cfg.tgBot.trim()) tgBot = cfg.tgBot.trim().replace(/^@/, "");
       aplicarEstadoUI();
       ultimaFirma = null;
       evaluarChat();
@@ -321,4 +373,14 @@
     aplicarEstadoUI();
     evaluarChat();
   }
+
+  // Si cambian los ajustes del flag, re-renderiza el chat actual.
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes.tgEnabled) tgEnabled = !!changes.tgEnabled.newValue;
+      if (changes.tgBot && typeof changes.tgBot.newValue === "string") tgBot = changes.tgBot.newValue.trim().replace(/^@/, "") || tgBot;
+      if (changes.tgEnabled || changes.tgBot) { ultimaFirma = null; evaluarChat(); }
+    });
+  } catch (e) {}
 })();

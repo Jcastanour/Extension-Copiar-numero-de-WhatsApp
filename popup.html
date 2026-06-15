@@ -256,6 +256,19 @@
       <input type="password" id="cfgApiKey" placeholder="pega tu API key" />
       <div class="hint">Se guarda solo en este navegador.</div>
     </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+
+    <div class="field" style="display:flex;align-items:center;justify-content:space-between;">
+      <label for="cfgTgEnabled" style="margin:0;">📨 Auto-Telegram (beta)</label>
+      <input type="checkbox" id="cfgTgEnabled" style="width:auto;" />
+    </div>
+    <div class="field">
+      <label for="cfgTgBot">Bot de Telegram</label>
+      <input type="text" id="cfgTgBot" placeholder="WolfStr_bot" />
+      <div class="hint">Usuario del bot (sin @). Muestra "Pedir código" en cada cuenta.</div>
+    </div>
+
     <div>
       <button id="cfgGuardar" class="btn btn-primary" style="width:auto; padding:10px 20px;">Guardar</button>
       <span id="cfgEstado"></span>

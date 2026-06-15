@@ -40,9 +40,39 @@ async function lookupCuentas(numero) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// PROTOTIPO Telegram (Bloque 2, detrás de flag): el overlay manda el correo,
+// aquí localizamos la pestaña de Telegram Web y reenviamos la orden al content
+// script telegram.js, que pega/envía y lee el código. Devolvemos el código.
+// ---------------------------------------------------------------------------
+async function pedirCodigoTelegram(correo, bot) {
+  const tabs = await chrome.tabs.query({ url: "*://web.telegram.org/*" });
+  if (!tabs.length) {
+    return { ok: false, error: "Abre web.telegram.org/k/ en una pestaña primero." };
+  }
+  // Prioriza una pestaña /k/ si hay varias.
+  const tab = tabs.find((t) => t.url && t.url.includes("/k/")) || tabs[0];
+
+  try {
+    const resp = await chrome.tabs.sendMessage(tab.id, { type: "tg-enviar", correo, bot });
+    return resp || { ok: false, error: "Sin respuesta de la pestaña de Telegram." };
+  } catch (e) {
+    return {
+      ok: false,
+      error: "No pude contactar la pestaña de Telegram. Recárgala (F5) para activar el script.",
+    };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "elixir-lookup" && typeof msg.numero === "string") {
     lookupCuentas(msg.numero).then(sendResponse).catch((err) =>
+      sendResponse({ ok: false, error: String(err) })
+    );
+    return true; // respuesta asíncrona
+  }
+  if (msg && msg.type === "tg-pedir-codigo" && typeof msg.correo === "string") {
+    pedirCodigoTelegram(msg.correo, msg.bot).then(sendResponse).catch((err) =>
       sendResponse({ ok: false, error: String(err) })
     );
     return true; // respuesta asíncrona

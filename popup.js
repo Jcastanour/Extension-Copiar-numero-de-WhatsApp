@@ -108,23 +108,24 @@ function hasChromeStorage() {
 function getConfig() {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.get(["baseUrl", "apiKey"], (cfg) => resolve(cfg || {}));
+      chrome.storage.local.get(["baseUrl", "apiKey", "tgEnabled", "tgBot"], (cfg) => resolve(cfg || {}));
     } else {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
         apiKey: localStorage.getItem("apiKey") || "",
+        tgEnabled: localStorage.getItem("tgEnabled") === "true",
+        tgBot: localStorage.getItem("tgBot") || "",
       });
     }
   });
 }
 
-function setConfig(baseUrl, apiKey) {
+function setConfig(extra) {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.set({ baseUrl, apiKey }, resolve);
+      chrome.storage.local.set(extra, resolve);
     } else {
-      localStorage.setItem("baseUrl", baseUrl);
-      localStorage.setItem("apiKey", apiKey);
+      Object.keys(extra).forEach((k) => localStorage.setItem(k, String(extra[k])));
       resolve();
     }
   });
@@ -298,15 +299,19 @@ async function buscarCuentas() {
 // Config: cargar / guardar
 // ---------------------------------------------------------------------------
 async function cargarConfigEnInputs() {
-  const { baseUrl, apiKey } = await getConfig();
+  const { baseUrl, apiKey, tgEnabled, tgBot } = await getConfig();
   if (baseUrl) document.getElementById("cfgBaseUrl").value = baseUrl;
   if (apiKey) document.getElementById("cfgApiKey").value = apiKey;
+  document.getElementById("cfgTgEnabled").checked = !!tgEnabled;
+  document.getElementById("cfgTgBot").value = tgBot || "";
 }
 
 async function guardarConfig() {
   const baseUrl = document.getElementById("cfgBaseUrl").value.trim().replace(/\/+$/, "");
   const apiKey = document.getElementById("cfgApiKey").value.trim();
-  await setConfig(baseUrl, apiKey);
+  const tgEnabled = document.getElementById("cfgTgEnabled").checked;
+  const tgBot = document.getElementById("cfgTgBot").value.trim().replace(/^@/, "");
+  await setConfig({ baseUrl, apiKey, tgEnabled, tgBot });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {

@@ -163,6 +163,23 @@ function textoDias(d) {
   return `Venció hace ${Math.abs(d)}d`;
 }
 
+// Flag prototipo Telegram (Bloque 2), se carga desde config en cargarConfigEnInputs.
+let tgEnabled = false;
+let tgBot = "WolfStr_bot";
+
+async function copiarTexto(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch (e) {
+    const temp = document.createElement("textarea");
+    temp.value = texto;
+    document.body.appendChild(temp);
+    temp.select();
+    document.execCommand("copy");
+    document.body.removeChild(temp);
+  }
+}
+
 function renderCuentas(accounts) {
   // El backend ya manda Disney primero; reordenamos por robustez.
   const ordenadas = accounts.slice().sort((a, b) => (b.is_disney ? 1 : 0) - (a.is_disney ? 1 : 0));
@@ -172,6 +189,7 @@ function renderCuentas(accounts) {
       const disney = !!acc.is_disney;
       const diasNeg = typeof acc.days_remaining === "number" && acc.days_remaining < 0;
       const statusActive = acc.status === "active";
+      const email = escapeHtml(acc.provider_email || "");
       return `
         <div class="card${disney ? " card-disney" : ""}">
           <div class="card-title">
@@ -185,9 +203,11 @@ function renderCuentas(accounts) {
               textoDias(acc.days_remaining)
             )}</span>
           </div>
-          <button class="copiar" data-email="${escapeHtml(acc.provider_email || "")}" data-idx="${i}">
+          <button class="copiar" data-email="${email}" data-idx="${i}">
             Copiar correo
           </button>
+          ${tgEnabled ? `<button class="pedir" data-email="${email}">📨 Pedir código (Telegram)</button>` : ""}
+          <div class="codigo-slot"></div>
         </div>`;
     })
     .join("");
@@ -200,17 +220,7 @@ function renderCuentas(accounts) {
     btn.addEventListener("click", async () => {
       const email = btn.getAttribute("data-email");
       if (!email) return;
-      try {
-        await navigator.clipboard.writeText(email);
-      } catch (e) {
-        // Fallback por si clipboard API falla
-        const temp = document.createElement("textarea");
-        temp.value = email;
-        document.body.appendChild(temp);
-        temp.select();
-        document.execCommand("copy");
-        document.body.removeChild(temp);
-      }
+      await copiarTexto(email);
       const original = btn.textContent;
       btn.textContent = "¡Copiado!";
       btn.classList.add("copiado");
@@ -219,6 +229,41 @@ function renderCuentas(accounts) {
         btn.classList.remove("copiado");
       }, 1200);
     });
+  });
+
+  // Listeners de "Pedir código (Telegram)"
+  document.querySelectorAll("#resultados .pedir").forEach((btn) => {
+    btn.addEventListener("click", () => pedirCodigoTelegram(btn));
+  });
+}
+
+function pedirCodigoTelegram(btn) {
+  const email = btn.getAttribute("data-email");
+  if (!email) return;
+  const slot = btn.parentElement.querySelector(".codigo-slot");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Enviando a Telegram…";
+  if (slot) slot.innerHTML = "";
+
+  chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot: tgBot }, (resp) => {
+    btn.disabled = false;
+    btn.textContent = original;
+    if (chrome.runtime.lastError) { if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`; return; }
+    if (!resp) { if (slot) slot.innerHTML = `<div class="msg error">Sin respuesta.</div>`; return; }
+    if (!resp.ok) { if (slot) slot.innerHTML = `<div class="msg error">${escapeHtml(resp.error || "No se pudo.")}</div>`; return; }
+    if (!slot) return;
+    if (resp.codigo) {
+      slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>`;
+      slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+        await copiarTexto(resp.codigo);
+        e.target.textContent = "✓";
+        setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+      });
+      copiarTexto(resp.codigo); // copia automática
+    } else {
+      slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 90))}</small></div>`;
+    }
   });
 }
 
@@ -299,19 +344,23 @@ async function buscarCuentas() {
 // Config: cargar / guardar
 // ---------------------------------------------------------------------------
 async function cargarConfigEnInputs() {
-  const { baseUrl, apiKey, tgEnabled, tgBot } = await getConfig();
-  if (baseUrl) document.getElementById("cfgBaseUrl").value = baseUrl;
-  if (apiKey) document.getElementById("cfgApiKey").value = apiKey;
-  document.getElementById("cfgTgEnabled").checked = !!tgEnabled;
-  document.getElementById("cfgTgBot").value = tgBot || "";
+  const cfg = await getConfig();
+  if (cfg.baseUrl) document.getElementById("cfgBaseUrl").value = cfg.baseUrl;
+  if (cfg.apiKey) document.getElementById("cfgApiKey").value = cfg.apiKey;
+  tgEnabled = !!cfg.tgEnabled;
+  if (cfg.tgBot && cfg.tgBot.trim()) tgBot = cfg.tgBot.trim().replace(/^@/, "");
+  document.getElementById("cfgTgEnabled").checked = tgEnabled;
+  document.getElementById("cfgTgBot").value = cfg.tgBot || "";
 }
 
 async function guardarConfig() {
   const baseUrl = document.getElementById("cfgBaseUrl").value.trim().replace(/\/+$/, "");
   const apiKey = document.getElementById("cfgApiKey").value.trim();
-  const tgEnabled = document.getElementById("cfgTgEnabled").checked;
-  const tgBot = document.getElementById("cfgTgBot").value.trim().replace(/^@/, "");
-  await setConfig({ baseUrl, apiKey, tgEnabled, tgBot });
+  const tgEnabledNuevo = document.getElementById("cfgTgEnabled").checked;
+  const tgBotNuevo = document.getElementById("cfgTgBot").value.trim().replace(/^@/, "");
+  tgEnabled = tgEnabledNuevo;
+  if (tgBotNuevo) tgBot = tgBotNuevo;
+  await setConfig({ baseUrl, apiKey, tgEnabled: tgEnabledNuevo, tgBot: tgBotNuevo });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {

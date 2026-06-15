@@ -186,6 +186,22 @@
     .copiar:hover { background: #f3f0ff; }
     .copiar.copiado { background: var(--ok-bg); color: var(--ok-fg); border-color: #bfe9cf; }
 
+    .pedir {
+      width: 100%; margin-top: 6px;
+      background: var(--brand-grad); color: #fff; border: none;
+      border-radius: 9px; font-weight: 600; font-size: 13px; padding: 8px; cursor: pointer;
+    }
+    .pedir:hover { filter: brightness(1.05); }
+    .pedir:disabled { opacity: .7; cursor: default; }
+    .codigo {
+      margin-top: 6px; background: #0f172a; color: #fff; border-radius: 9px;
+      padding: 8px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .codigo b { font-size: 16px; letter-spacing: 1px; }
+    .codigo small { color: #cbd5e1; font-weight: 400; }
+    .codigo .ccopy { background: rgba(255,255,255,.16); border: none; color: #fff; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+
     /* Ajustes */
     .ajustes-head {
       display: flex; align-items: center; gap: 8px;

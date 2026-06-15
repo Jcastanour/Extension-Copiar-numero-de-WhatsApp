@@ -16,6 +16,13 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["*://web.whatsapp.com/*"],
+      "js": ["overlay.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "host_permissions": [
     "*://web.whatsapp.com/*",
     "http://localhost:8000/*",

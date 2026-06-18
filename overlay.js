@@ -99,20 +99,25 @@
   // ----- Shadow DOM / UI -----
   const host = document.createElement("div");
   host.id = "elixir-overlay-host";
-  host.style.cssText = "position:fixed;z-index:2147483000;bottom:16px;right:16px;";
+  // El host se ancla siempre por left/top (= pos de la burbuja), fijado en JS.
+  // width:0 para que el panel/toast (position:fixed) no lo estiren.
+  host.style.cssText = "position:fixed;z-index:2147483000;left:0;top:0;width:0;height:0;";
   const shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML = `
     <style>
       :host, * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
       .launcher {
-        width: 46px; height: 46px; border-radius: 50%;
+        position: fixed; width: 46px; height: 46px; border-radius: 50%;
         background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%);
-        color:#fff; font-size:22px; border:none; cursor:pointer;
+        color:#fff; font-size:22px; border:none; cursor:grab;
         box-shadow: 0 4px 14px rgba(124,58,237,.45);
         display:flex; align-items:center; justify-content:center;
+        touch-action:none; user-select:none;
       }
+      .launcher.dragging { cursor:grabbing; }
       .panel {
-        width: 300px; max-height: 70vh; display:flex; flex-direction:column;
+        position: fixed; width: 300px; max-height: 70vh; display:flex; flex-direction:column;
         background:#fff; color:#1e1b2e; border-radius:14px; overflow:hidden;
         box-shadow: 0 10px 30px rgba(20,16,41,.28);
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
@@ -121,7 +126,15 @@
       .hdr {
         background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%);
         color:#fff; padding:9px 11px; display:flex; align-items:center; justify-content:space-between;
-        cursor:default;
+        cursor:grab; touch-action:none; user-select:none;
+      }
+      .hdr.dragging { cursor:grabbing; }
+      .toast {
+        position: fixed; max-width: 220px;
+        background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%); color:#fff;
+        border-radius:11px; padding:9px 13px; font-size:12.5px; font-weight:600; line-height:1.3;
+        box-shadow: 0 6px 20px rgba(124,58,237,.4);
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
       }
       .hdr .ttl { font-weight:700; font-size:13.5px; display:flex; gap:6px; align-items:center; }
       .hdr-actions { display:flex; gap:4px; }
@@ -132,7 +145,6 @@
       }
       .mini:hover { background:rgba(255,255,255,.32); }
       .body { padding:10px; overflow-y:auto; }
-      .panel.collapsed .body { display:none; }
 
       .msg { color:#6b7280; text-align:center; padding:12px; font-size:12.5px; }
       .msg.error { color:#b42318; }
@@ -152,6 +164,7 @@
       .badge { font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; background:#eef0f4; color:#4b5563; text-transform:capitalize; }
       .badge.active, .badge.ok { background:#e7f7ee; color:#137a45; }
       .badge.bad { background:#fdeaea; color:#b42318; }
+      .badge.prov { background:#ede9fe; color:#6d28d9; text-transform:none; }
       .copy { width:100%; background:#fff; color:#7c3aed; border:1px solid #ddd4ff; border-radius:8px; font-weight:600; font-size:12.5px; padding:7px; cursor:pointer; }
       .copy:hover { background:#f3f0ff; }
       .copy.done { background:#e7f7ee; color:#137a45; border-color:#bfe9cf; }
@@ -162,6 +175,7 @@
       .codigo b { font-size:15px; letter-spacing:1px; }
       .codigo small { color:#cbd5e1; font-weight:400; }
       .codigo .ccopy { background:rgba(255,255,255,.16); border:none; color:#fff; border-radius:6px; padding:3px 8px; font-size:11.5px; cursor:pointer; }
+      .codigo .copiado-ok { color:#34d399; font-size:11px; font-weight:600; }
     </style>
     <button class="launcher" id="launcher" title="Mostrar cuentas Elixir" hidden>⚡</button>
     <div class="panel" id="panel">
@@ -176,26 +190,112 @@
       <div class="body" id="body">
         <div class="msg">Abre un chat para ver las cuentas.</div>
       </div>
-    </div>`;
+    </div>
+    <div class="toast" id="toast" hidden></div>`;
   document.documentElement.appendChild(host);
 
   const elPanel = shadow.getElementById("panel");
   const elLauncher = shadow.getElementById("launcher");
   const elBody = shadow.getElementById("body");
+  const elToast = shadow.getElementById("toast");
+
+  // ----- Posición (burbuja, panel y toast son position:fixed) -----
+  const BW = 46;        // tamaño de la burbuja
+  const GAP = 8;        // separación burbuja↔panel/toast
+  let pos = { left: 16, top: 16 }; // esquina sup-izq de la burbuja (se fija en init)
+
+  function clampPos(left, top) {
+    const maxLeft = Math.max(0, window.innerWidth - BW);
+    const maxTop = Math.max(0, window.innerHeight - BW);
+    return { left: Math.min(Math.max(0, left), maxLeft), top: Math.min(Math.max(0, top), maxTop) };
+  }
+  function aplicarPosBurbuja() {
+    elLauncher.style.left = pos.left + "px";
+    elLauncher.style.top = pos.top + "px";
+  }
+  // Coloca un elemento flotante (panel/toast) junto a la burbuja, abriendo hacia
+  // el interior de la pantalla. Limpia los 4 anclajes antes de fijar 2.
+  function colocarFlotante(el) {
+    const cx = pos.left + BW / 2, cy = pos.top + BW / 2;
+    el.style.left = el.style.right = el.style.top = el.style.bottom = "auto";
+    if (cx > window.innerWidth / 2) el.style.right = (window.innerWidth - (pos.left + BW)) + "px";
+    else el.style.left = pos.left + "px";
+    if (cy < window.innerHeight / 2) el.style.top = (pos.top + BW + GAP) + "px";
+    else el.style.bottom = (window.innerHeight - pos.top + GAP) + "px";
+  }
+  function posicionarPanel() { colocarFlotante(elPanel); }
 
   // ----- Estado persistido (chrome.storage.local) -----
-  let enabled = true;
-  let collapsed = false;
-  let tgEnabled = false;        // flag prototipo Telegram (Bloque 2)
-  let tgBot = "WolfStr_bot";    // bot por defecto
+  // "bubble" (defecto): solo la burbuja, sin lookup automático.
+  // "panel": panel abierto; al entrar se dispara el lookup del chat actual.
+  // "hidden": nada visible; solo se sale con el atajo de teclado.
+  let state = "bubble";
+  let tgEnabled = false;          // flag prototipo Telegram (Bloque 2)
+  let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
+  let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
+
+  // Decide a qué bot pedir el código según la cuenta. El backend manda el NOMBRE
+  // del proveedor (ej. "Digital KH", "Andrés"); aquí lo mapeamos al bot. Si no
+  // viene proveedor o es uno sin bot (ProveedorYT, Elixir…), fallback por is_disney.
+  function botParaCuenta(acc) {
+    // Normaliza: quita acentos y pasa a minúsculas ("Andrés" -> "andres").
+    const prov = (acc.provider || acc.provider_name || acc.proveedor || "")
+      .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    let bot = acc.is_disney ? tgBotKh : tgBotWolf; // fallback
+    if (prov) {
+      if (/kh|digital/.test(prov)) bot = tgBotKh;         // Digital KH
+      else if (/wolf|andres/.test(prov)) bot = tgBotWolf; // Andrés
+    }
+    console.log("[Elixir] provider:", JSON.stringify(acc.provider), "is_disney:", acc.is_disney, "-> bot:", bot);
+    return bot;
+  }
+  // Nombre del proveedor para mostrar en la tarjeta (badge).
+  function nombreProveedor(acc) {
+    return acc.provider || acc.provider_name || acc.proveedor || "";
+  }
+  let buscando = false;         // evita búsquedas concurrentes (re-entradas del observer)
+  let firmaCargada = null;      // firma del chat cuyas cuentas están renderizadas (cache)
 
   function aplicarEstadoUI() {
-    elLauncher.hidden = enabled;
-    elPanel.hidden = !enabled;
-    elPanel.classList.toggle("collapsed", collapsed);
+    elLauncher.hidden = state !== "bubble";
+    elPanel.hidden = state !== "panel";
   }
   function guardarEstado() {
-    try { chrome.storage.local.set({ overlayEnabled: enabled, overlayCollapsed: collapsed }); } catch (e) {}
+    try { chrome.storage.local.set({ overlayState: state }); } catch (e) {}
+  }
+
+  // Cambia de estado, refresca UI, persiste y (si abre el panel) evalúa el chat.
+  function setState(nuevo) {
+    state = nuevo;
+    aplicarEstadoUI();
+    guardarEstado();
+    if (state === "panel") {
+      posicionarPanel();
+      evaluarChat(); // muestra cache si no cambió el chat; si cambió, busca
+    }
+  }
+
+  // ----- Aviso flotante (toast) junto a la burbuja -----
+  let toastTimer = null;
+  function mostrarAviso(texto) {
+    elToast.textContent = texto;
+    elToast.hidden = false;
+    colocarFlotante(elToast);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { elToast.hidden = true; }, 3000);
+  }
+
+  // Búsqueda completa: abre el panel de contacto si hace falta, encuentra el
+  // número y consulta las cuentas. Sin número → vuelve a burbuja + aviso.
+  // `buscando` se mantiene hasta que lookup() responde (lo libera su callback).
+  async function buscarAhora() {
+    if (buscando) return;
+    buscando = true;
+    setMsg("Buscando…");
+    const numero = await numeroCompleto();
+    if (state !== "panel") { buscando = false; return; } // se minimizó/cerró mientras buscaba
+    if (!numero) { buscando = false; setState("bubble"); mostrarAviso("Sin número en este chat"); return; }
+    lookup(numero);
   }
 
   // ----- Render -----
@@ -215,9 +315,10 @@
           <div class="meta">
             <span class="badge${active ? " active" : ""}">${escapeHtml(acc.status || "")}</span>
             <span class="badge ${diasNeg ? "bad" : "ok"}">${escapeHtml(textoDias(acc.days_remaining))}</span>
+            ${nombreProveedor(acc) ? `<span class="badge prov">${escapeHtml(nombreProveedor(acc))}</span>` : ""}
           </div>
           <button class="copy" data-email="${escapeHtml(acc.provider_email || "")}">Copiar correo</button>
-          ${tgEnabled ? `<button class="pedir" data-email="${escapeHtml(acc.provider_email || "")}">📨 Pedir código (Telegram)</button>` : ""}
+          ${tgEnabled ? `<button class="pedir" data-email="${escapeHtml(acc.provider_email || "")}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>` : ""}
           <div class="codigo-slot"></div>
         </div>`;
     }).join("");
@@ -255,26 +356,27 @@
     const slot = btn.parentElement.querySelector(".codigo-slot");
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "Enviando a Telegram…";
+    btn.textContent = "Abriendo Telegram…";
     if (slot) slot.innerHTML = "";
 
-    chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot: tgBot }, (resp) => {
+    const bot = btn.getAttribute("data-bot") || tgBotWolf;
+    chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot }, (resp) => {
       btn.disabled = false;
       btn.textContent = orig;
       if (chrome.runtime.lastError) { if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`; return; }
       if (!resp) { if (slot) slot.innerHTML = `<div class="msg error">Sin respuesta.</div>`; return; }
       if (!resp.ok) { if (slot) slot.innerHTML = `<div class="msg error">${escapeHtml(resp.error || "No se pudo.")}</div>`; return; }
       if (!slot) return;
+      const nota = resp.copiado ? ' · <span class="copiado-ok">copiado ✓</span>' : "";
       if (resp.codigo) {
-        slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>`;
+        slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b>${nota}</span><button class="ccopy">Copiar</button></div>`;
         slot.querySelector(".ccopy").addEventListener("click", async (e) => {
           await copiar(resp.codigo);
           e.target.textContent = "✓";
           setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
         });
-        copiar(resp.codigo); // copia automática
       } else {
-        slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 80))}</small></div>`;
+        slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 80))}${nota}</small></div>`;
       }
     });
   }
@@ -288,17 +390,20 @@
     ultimoNumero = numero;
     setMsg("Buscando…");
     chrome.runtime.sendMessage({ type: "elixir-lookup", numero }, (resp) => {
+      buscando = false;
       if (id !== reqId) return; // respuesta vieja (cambió el chat): ignorar
-      if (chrome.runtime.lastError) { setMsg("No se pudo consultar (recarga la extensión).", true); return; }
-      if (!resp) { setMsg("Sin respuesta del servicio.", true); return; }
-      if (resp.aborted) return;
-      if (!resp.ok) { setMsg(resp.error || "Error al consultar.", true); return; }
+      if (resp && resp.aborted) return;
+      if (chrome.runtime.lastError) { setState("bubble"); mostrarAviso("No se pudo consultar (recarga la extensión)."); return; }
+      if (!resp) { setState("bubble"); mostrarAviso("Sin respuesta del servicio."); return; }
+      if (!resp.ok) { setState("bubble"); mostrarAviso(resp.error || "Error al consultar."); return; }
       const data = resp.data || {};
       if (!data.count || !Array.isArray(data.accounts) || data.accounts.length === 0) {
-        setMsg("Sin cuentas para este número.");
+        setState("bubble"); mostrarAviso("Sin cuentas para este número");
         return;
       }
+      firmaCargada = firmaChat(); // cache: reabrir el mismo chat no re-busca
       renderCuentas(numero, data.accounts);
+      posicionarPanel();
     });
   }
 
@@ -309,21 +414,12 @@
     return cleanText(header.textContent).slice(0, 120);
   }
 
-  let ultimaFirma = null;
   function evaluarChat() {
-    if (!enabled || collapsed) return;
+    if (state !== "panel" || buscando) return;
     const firma = firmaChat();
-    if (firma === ultimaFirma) return;
-    ultimaFirma = firma;
-
-    if (!firma) { reqId++; ultimoNumero = null; setMsg("Abre un chat para ver las cuentas."); return; }
-    const numero = numeroDesdeHeader();
-    if (!numero) {
-      reqId++; ultimoNumero = null;
-      setMsg("Este chat no muestra número. Pulsa 🔍 para buscarlo.");
-      return;
-    }
-    lookup(numero);
+    if (!firma) { setState("bubble"); mostrarAviso("Abre un chat"); return; }
+    if (firma === firmaCargada) { posicionarPanel(); return; } // ya tenemos sus cuentas: cache
+    buscarAhora();
   }
 
   // debounce con maxWait para no morir bajo mutaciones constantes
@@ -340,38 +436,110 @@
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
   // ----- Botones -----
-  shadow.getElementById("btnCollapse").addEventListener("click", () => {
-    collapsed = !collapsed; aplicarEstadoUI(); guardarEstado();
-    if (!collapsed) { ultimaFirma = null; evaluarChat(); }
+  shadow.getElementById("btnCollapse").addEventListener("click", () => setState("bubble")); // — minimiza a burbuja
+  shadow.getElementById("btnClose").addEventListener("click", () => setState("hidden"));     // ✕ oculta todo
+  shadow.getElementById("btnRefresh").addEventListener("click", () => { firmaCargada = null; buscarAhora(); }); // 🔍 fuerza re-búsqueda
+
+  // ----- Arrastre (burbuja y cabecera del panel) -----
+  const DRAG_UMBRAL = 5;
+
+  function persistirPos() {
+    try { chrome.storage.local.set({ overlayPos: { left: pos.left, top: pos.top } }); } catch (_) {}
+  }
+
+  // Hace arrastrable un elemento moviendo `pos` por delta. onClick (sin arrastre) opcional.
+  function hacerArrastrable(handle, onClick) {
+    let d = null;
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest(".hdr-actions")) return; // no arrastrar desde los botones del panel
+      d = { x: e.clientX, y: e.clientY, baseLeft: pos.left, baseTop: pos.top, moved: false };
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!d) return;
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (!d.moved && Math.hypot(dx, dy) < DRAG_UMBRAL) return;
+      d.moved = true;
+      handle.classList.add("dragging");
+      pos = clampPos(d.baseLeft + dx, d.baseTop + dy);
+      aplicarPosBurbuja();
+      if (state === "panel") posicionarPanel();
+    });
+    handle.addEventListener("pointerup", (e) => {
+      if (!d) return;
+      const movido = d.moved;
+      d = null;
+      handle.classList.remove("dragging");
+      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (movido) persistirPos();
+      else if (onClick) onClick();
+    });
+  }
+
+  hacerArrastrable(elLauncher, () => setState("panel")); // clic en la burbuja abre el panel
+  hacerArrastrable(shadow.querySelector(".hdr"));        // arrastrar el panel por su cabecera
+
+  // ----- Tocar fuera del panel → minimizar a burbuja -----
+  document.addEventListener("pointerdown", (e) => {
+    if (state !== "panel") return;
+    if (e.composedPath().includes(host)) return; // clic dentro del overlay: no cerrar
+    setState("bubble");
+  }, true);
+
+  // Reubica el panel/aviso si cambia el tamaño de la ventana.
+  window.addEventListener("resize", () => {
+    pos = clampPos(pos.left, pos.top);
+    aplicarPosBurbuja();
+    if (state === "panel") posicionarPanel();
+    if (!elToast.hidden) colocarFlotante(elToast);
   });
-  shadow.getElementById("btnClose").addEventListener("click", () => {
-    enabled = false; aplicarEstadoUI(); guardarEstado();
-  });
-  elLauncher.addEventListener("click", () => {
-    enabled = true; aplicarEstadoUI(); guardarEstado();
-    ultimaFirma = null; evaluarChat();
-  });
-  shadow.getElementById("btnRefresh").addEventListener("click", async () => {
-    setMsg("Buscando número…");
-    const numero = await numeroCompleto();
-    if (!numero) { setMsg("No se encontró el número de este chat.", true); return; }
-    lookup(numero);
-  });
+
+  // ----- Atajo de teclado en página: Ctrl/Cmd+Shift+Space -----
+  // En la página (no chrome.commands) para evitar el límite de 4 comandos del manifest.
+  document.addEventListener("keydown", (e) => {
+    if (!e.shiftKey) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.code !== "Space") return;
+    e.preventDefault();
+    setState(state === "panel" ? "bubble" : "panel"); // toggle (también saca de "hidden")
+  }, true);
+
+  // Posición por defecto: esquina inferior-derecha, arriba del compositor.
+  function posDefecto() {
+    return clampPos(window.innerWidth - 16 - BW, window.innerHeight - 96 - BW);
+  }
+
+  function arrancar() {
+    aplicarPosBurbuja();
+    aplicarEstadoUI();
+    if (state === "panel") { posicionarPanel(); evaluarChat(); }
+  }
 
   // ----- Init -----
   try {
-    chrome.storage.local.get(["overlayEnabled", "overlayCollapsed", "tgEnabled", "tgBot"], (cfg) => {
-      if (cfg && typeof cfg.overlayEnabled === "boolean") enabled = cfg.overlayEnabled;
-      if (cfg && typeof cfg.overlayCollapsed === "boolean") collapsed = cfg.overlayCollapsed;
-      if (cfg && typeof cfg.tgEnabled === "boolean") tgEnabled = cfg.tgEnabled;
-      if (cfg && typeof cfg.tgBot === "string" && cfg.tgBot.trim()) tgBot = cfg.tgBot.trim().replace(/^@/, "");
-      aplicarEstadoUI();
-      ultimaFirma = null;
-      evaluarChat();
-    });
+    chrome.storage.local.get(
+      ["overlayState", "overlayEnabled", "overlayCollapsed", "overlayPos", "tgEnabled", "tgBotKh", "tgBotWolf"],
+      (cfg) => {
+        if (cfg && (cfg.overlayState === "bubble" || cfg.overlayState === "panel" || cfg.overlayState === "hidden")) {
+          state = cfg.overlayState;
+        } else if (cfg && cfg.overlayEnabled === false) {
+          state = "hidden"; // migración del esquema viejo (estaba "cerrado")
+        } else {
+          state = "bubble"; // por defecto solo la burbuja
+        }
+        pos = (cfg && cfg.overlayPos && typeof cfg.overlayPos.left === "number")
+          ? clampPos(cfg.overlayPos.left, cfg.overlayPos.top)
+          : posDefecto();
+        if (cfg && typeof cfg.tgEnabled === "boolean") tgEnabled = cfg.tgEnabled;
+        if (cfg && typeof cfg.tgBotKh === "string" && cfg.tgBotKh.trim()) tgBotKh = cfg.tgBotKh.trim().replace(/^@/, "");
+        if (cfg && typeof cfg.tgBotWolf === "string" && cfg.tgBotWolf.trim()) tgBotWolf = cfg.tgBotWolf.trim().replace(/^@/, "");
+        arrancar();
+      }
+    );
   } catch (e) {
-    aplicarEstadoUI();
-    evaluarChat();
+    pos = posDefecto();
+    arrancar();
   }
 
   // Si cambian los ajustes del flag, re-renderiza el chat actual.
@@ -379,8 +547,9 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes.tgEnabled) tgEnabled = !!changes.tgEnabled.newValue;
-      if (changes.tgBot && typeof changes.tgBot.newValue === "string") tgBot = changes.tgBot.newValue.trim().replace(/^@/, "") || tgBot;
-      if (changes.tgEnabled || changes.tgBot) { ultimaFirma = null; evaluarChat(); }
+      if (changes.tgBotKh && typeof changes.tgBotKh.newValue === "string") tgBotKh = changes.tgBotKh.newValue.trim().replace(/^@/, "") || tgBotKh;
+      if (changes.tgBotWolf && typeof changes.tgBotWolf.newValue === "string") tgBotWolf = changes.tgBotWolf.newValue.trim().replace(/^@/, "") || tgBotWolf;
+      if (changes.tgEnabled || changes.tgBotKh || changes.tgBotWolf) { firmaCargada = null; evaluarChat(); }
     });
   } catch (e) {}
 })();

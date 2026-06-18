@@ -170,6 +170,7 @@
     .badge.active { background: var(--ok-bg); color: var(--ok-fg); }
     .badge.dias-ok { background: var(--ok-bg); color: var(--ok-fg); }
     .badge.dias-vencido { background: var(--bad-bg); color: var(--bad-fg); }
+    .badge.prov { background: #ede9fe; color: #6d28d9; text-transform: none; }
 
     .copiar {
       width: 100%;
@@ -201,6 +202,7 @@
     .codigo b { font-size: 16px; letter-spacing: 1px; }
     .codigo small { color: #cbd5e1; font-weight: 400; }
     .codigo .ccopy { background: rgba(255,255,255,.16); border: none; color: #fff; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+    .codigo .copiado-ok { color: #34d399; font-size: 11px; font-weight: 600; }
 
     /* Ajustes */
     .ajustes-head {
@@ -264,7 +266,7 @@
 
     <div class="field">
       <label for="cfgBaseUrl">BASE_URL</label>
-      <input type="text" id="cfgBaseUrl" placeholder="https://elixircuentas-test.fly.dev" />
+      <input type="text" id="cfgBaseUrl" placeholder="https://elixircuentas.com" />
       <div class="hint">URL del backend (sin barra final).</div>
     </div>
     <div class="field">
@@ -280,9 +282,14 @@
       <input type="checkbox" id="cfgTgEnabled" style="width:auto;" />
     </div>
     <div class="field">
-      <label for="cfgTgBot">Bot de Telegram</label>
-      <input type="text" id="cfgTgBot" placeholder="WolfStr_bot" />
-      <div class="hint">Usuario del bot (sin @). Muestra "Pedir código" en cada cuenta.</div>
+      <label for="cfgTgBotKh">Bot Disney / DigitalKH</label>
+      <input type="text" id="cfgTgBotKh" placeholder="userdkh_bot" />
+      <div class="hint">Usuario del bot (sin @) para cuentas Disney / KH.</div>
+    </div>
+    <div class="field">
+      <label for="cfgTgBotWolf">Bot Andres / Wolf</label>
+      <input type="text" id="cfgTgBotWolf" placeholder="WolfStr_bot" />
+      <div class="hint">Usuario del bot (sin @) para las demás cuentas.</div>
     </div>
 
     <div>

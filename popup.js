@@ -108,13 +108,14 @@ function hasChromeStorage() {
 function getConfig() {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.get(["baseUrl", "apiKey", "tgEnabled", "tgBot"], (cfg) => resolve(cfg || {}));
+      chrome.storage.local.get(["baseUrl", "apiKey", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
     } else {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
         apiKey: localStorage.getItem("apiKey") || "",
         tgEnabled: localStorage.getItem("tgEnabled") === "true",
-        tgBot: localStorage.getItem("tgBot") || "",
+        tgBotKh: localStorage.getItem("tgBotKh") || "",
+        tgBotWolf: localStorage.getItem("tgBotWolf") || "",
       });
     }
   });
@@ -165,7 +166,28 @@ function textoDias(d) {
 
 // Flag prototipo Telegram (Bloque 2), se carga desde config en cargarConfigEnInputs.
 let tgEnabled = false;
-let tgBot = "WolfStr_bot";
+let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
+let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
+
+// Decide a qué bot pedir el código según la cuenta. El backend manda el NOMBRE
+// del proveedor (ej. "Digital KH", "Andrés"); aquí lo mapeamos al bot. Si no
+// viene proveedor o es uno sin bot (ProveedorYT, Elixir…), fallback por is_disney.
+function botParaCuenta(acc) {
+  // Normaliza: quita acentos y pasa a minúsculas ("Andrés" -> "andres").
+  const prov = (acc.provider || acc.provider_name || acc.proveedor || "")
+    .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  let bot = acc.is_disney ? tgBotKh : tgBotWolf; // fallback
+  if (prov) {
+    if (/kh|digital/.test(prov)) bot = tgBotKh;         // Digital KH
+    else if (/wolf|andres/.test(prov)) bot = tgBotWolf; // Andrés
+  }
+  console.log("[Elixir] provider:", JSON.stringify(acc.provider), "is_disney:", acc.is_disney, "-> bot:", bot);
+  return bot;
+}
+// Nombre del proveedor para mostrar en la tarjeta (badge).
+function nombreProveedor(acc) {
+  return acc.provider || acc.provider_name || acc.proveedor || "";
+}
 
 async function copiarTexto(texto) {
   try {
@@ -202,11 +224,12 @@ function renderCuentas(accounts) {
             <span class="badge ${diasNeg ? "dias-vencido" : "dias-ok"}">${escapeHtml(
               textoDias(acc.days_remaining)
             )}</span>
+            ${nombreProveedor(acc) ? `<span class="badge prov">${escapeHtml(nombreProveedor(acc))}</span>` : ""}
           </div>
           <button class="copiar" data-email="${email}" data-idx="${i}">
             Copiar correo
           </button>
-          ${tgEnabled ? `<button class="pedir" data-email="${email}">📨 Pedir código (Telegram)</button>` : ""}
+          ${tgEnabled ? `<button class="pedir" data-email="${email}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>` : ""}
           <div class="codigo-slot"></div>
         </div>`;
     })
@@ -235,6 +258,32 @@ function renderCuentas(accounts) {
   document.querySelectorAll("#resultados .pedir").forEach((btn) => {
     btn.addEventListener("click", () => pedirCodigoTelegram(btn));
   });
+
+  // Repinta el código pedido en una sesión anterior del popup (si es reciente).
+  restaurarUltimoResultadoTG();
+}
+
+// Pinta el resultado de Telegram (código o texto/error) en un slot dado.
+function pintarResultadoTG(slot, resp) {
+  if (!slot || !resp) return;
+  if (!resp.ok) {
+    slot.innerHTML = `<div class="msg error">${escapeHtml(resp.error || "No se pudo.")}</div>`;
+    return;
+  }
+  // El mensaje completo ya se copió en Telegram (resp.copiado); aquí no
+  // re-copiamos para no pisar el portapapeles. El botón "Copiar" queda por si
+  // quieren solo el código.
+  const nota = resp.copiado ? ' · <span class="copiado-ok">copiado ✓</span>' : "";
+  if (resp.codigo) {
+    slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b>${nota}</span><button class="ccopy">Copiar</button></div>`;
+    slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+      await copiarTexto(resp.codigo);
+      e.target.textContent = "✓";
+      setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+    });
+  } else {
+    slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 90))}${nota}</small></div>`;
+  }
 }
 
 function pedirCodigoTelegram(btn) {
@@ -243,27 +292,32 @@ function pedirCodigoTelegram(btn) {
   const slot = btn.parentElement.querySelector(".codigo-slot");
   const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "Enviando a Telegram…";
-  if (slot) slot.innerHTML = "";
+  btn.textContent = "Abriendo Telegram…";
+  // El popup se cierra al cambiar de foco a Telegram: avisamos qué hacer.
+  if (slot) slot.innerHTML = `<div class="msg"><small>Abriendo Telegram… el código queda en Telegram y en el portapapeles.</small></div>`;
 
-  chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot: tgBot }, (resp) => {
+  const bot = btn.getAttribute("data-bot") || tgBotWolf;
+  chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot }, (resp) => {
+    // Puede que el popup ya esté cerrado (no llega). Si sigue vivo, pintamos.
     btn.disabled = false;
     btn.textContent = original;
     if (chrome.runtime.lastError) { if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`; return; }
     if (!resp) { if (slot) slot.innerHTML = `<div class="msg error">Sin respuesta.</div>`; return; }
-    if (!resp.ok) { if (slot) slot.innerHTML = `<div class="msg error">${escapeHtml(resp.error || "No se pudo.")}</div>`; return; }
-    if (!slot) return;
-    if (resp.codigo) {
-      slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>`;
-      slot.querySelector(".ccopy").addEventListener("click", async (e) => {
-        await copiarTexto(resp.codigo);
-        e.target.textContent = "✓";
-        setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
-      });
-      copiarTexto(resp.codigo); // copia automática
-    } else {
-      slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 90))}</small></div>`;
-    }
+    pintarResultadoTG(slot, resp);
+  });
+}
+
+// Al renderizar cuentas, repinta el último código pedido si es reciente (el popup
+// se cerró al ir a Telegram; el background lo guardó en storage).
+async function restaurarUltimoResultadoTG() {
+  let cfg;
+  try { cfg = await chrome.storage.local.get("tgUltimoResultado"); } catch (e) { return; }
+  const r = cfg && cfg.tgUltimoResultado;
+  if (!r || !r.correo || !r.ts || Date.now() - r.ts > 60000) return;
+  document.querySelectorAll("#resultados .pedir").forEach((btn) => {
+    if (btn.getAttribute("data-email") !== r.correo) return;
+    const slot = btn.parentElement.querySelector(".codigo-slot");
+    pintarResultadoTG(slot, r);
   });
 }
 
@@ -348,19 +402,23 @@ async function cargarConfigEnInputs() {
   if (cfg.baseUrl) document.getElementById("cfgBaseUrl").value = cfg.baseUrl;
   if (cfg.apiKey) document.getElementById("cfgApiKey").value = cfg.apiKey;
   tgEnabled = !!cfg.tgEnabled;
-  if (cfg.tgBot && cfg.tgBot.trim()) tgBot = cfg.tgBot.trim().replace(/^@/, "");
+  if (cfg.tgBotKh && cfg.tgBotKh.trim()) tgBotKh = cfg.tgBotKh.trim().replace(/^@/, "");
+  if (cfg.tgBotWolf && cfg.tgBotWolf.trim()) tgBotWolf = cfg.tgBotWolf.trim().replace(/^@/, "");
   document.getElementById("cfgTgEnabled").checked = tgEnabled;
-  document.getElementById("cfgTgBot").value = cfg.tgBot || "";
+  document.getElementById("cfgTgBotKh").value = cfg.tgBotKh || "";
+  document.getElementById("cfgTgBotWolf").value = cfg.tgBotWolf || "";
 }
 
 async function guardarConfig() {
   const baseUrl = document.getElementById("cfgBaseUrl").value.trim().replace(/\/+$/, "");
   const apiKey = document.getElementById("cfgApiKey").value.trim();
   const tgEnabledNuevo = document.getElementById("cfgTgEnabled").checked;
-  const tgBotNuevo = document.getElementById("cfgTgBot").value.trim().replace(/^@/, "");
+  const tgBotKhNuevo = document.getElementById("cfgTgBotKh").value.trim().replace(/^@/, "");
+  const tgBotWolfNuevo = document.getElementById("cfgTgBotWolf").value.trim().replace(/^@/, "");
   tgEnabled = tgEnabledNuevo;
-  if (tgBotNuevo) tgBot = tgBotNuevo;
-  await setConfig({ baseUrl, apiKey, tgEnabled: tgEnabledNuevo, tgBot: tgBotNuevo });
+  if (tgBotKhNuevo) tgBotKh = tgBotKhNuevo;
+  if (tgBotWolfNuevo) tgBotWolf = tgBotWolfNuevo;
+  await setConfig({ baseUrl, apiKey, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {

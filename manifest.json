@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Copiar número de WhatsApp",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "Una extensión que copia automáticamente el número de teléfono de WhatsApp Web.",
   "permissions": ["activeTab", "scripting", "clipboardWrite", "storage", "tabs"],
   "action": {

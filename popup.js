@@ -181,7 +181,6 @@ function botParaCuenta(acc) {
     if (/kh|digital/.test(prov)) bot = tgBotKh;         // Digital KH
     else if (/wolf|andres/.test(prov)) bot = tgBotWolf; // Andrés
   }
-  console.log("[Elixir] provider:", JSON.stringify(acc.provider), "is_disney:", acc.is_disney, "-> bot:", bot);
   return bot;
 }
 // Nombre del proveedor para mostrar en la tarjeta (badge).

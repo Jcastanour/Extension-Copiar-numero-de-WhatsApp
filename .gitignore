@@ -1,0 +1,6 @@
+# Builds para la Chrome Web Store
+dist/
+*.zip
+
+# Sistema
+.DS_Store

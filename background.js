@@ -101,8 +101,9 @@ function botDeUrl(url) {
 }
 
 // Manda la orden al content script (con retry de inyección si el script no está).
-async function enviarATelegram(tabId, correo, handle) {
-  const msg = { type: "tg-enviar", correo, bot: handle };
+// `switchTo` = handle del bot al que cambiar por el buscador (null si ya estamos).
+async function enviarATelegram(tabId, correo, handle, switchTo) {
+  const msg = { type: "tg-enviar", correo, bot: handle, switchTo: switchTo || null };
   try {
     return await chrome.tabs.sendMessage(tabId, msg);
   } catch (e) {
@@ -137,17 +138,15 @@ function navegarABot(tabId, handle) {
 async function pedirCodigoTelegram(correo, bot, sender) {
   const handle = (bot || "WolfStr_bot").replace(/^@/, "");
 
-  // Localiza o abre la pestaña de Telegram. Decidimos si recargar leyendo la URL
-  // real de la pestaña (ground-truth del bot abierto), no una suposición.
+  // Localiza o abre la pestaña de Telegram. Decidimos si hace falta cambiar de bot
+  // leyendo la URL real (ground-truth del bot abierto), no una suposición.
   let tab = await obtenerTabTelegram();
+  let switchTo = null; // handle al que cambiar por el buscador (null = ya estamos)
   if (!tab) {
-    try { tab = await abrirTabTelegram(handle); }
+    try { tab = await abrirTabTelegram(handle); } // pestaña nueva: ya carga en el bot
     catch (e) { return { ok: false, error: "No pude abrir Telegram." }; }
   } else if (botDeUrl(tab.url) !== handle.toLowerCase()) {
-    // La pestaña está en otro bot (o el hash no es deep-link): carga completa al correcto.
-    if (!(await navegarABot(tab.id, handle))) {
-      return { ok: false, error: "Telegram tardó en cargar, reintenta." };
-    }
+    switchTo = handle; // está en otro bot: intentamos cambiar SIN recargar (buscador)
   }
 
   // Enfoca Telegram (destraba el render del SPA) y NOS QUEDAMOS ahí: el usuario
@@ -159,9 +158,25 @@ async function pedirCodigoTelegram(correo, bot, sender) {
 
   let resp;
   try {
-    resp = await enviarATelegram(tab.id, correo, handle);
+    resp = await enviarATelegram(tab.id, correo, handle, switchTo);
   } catch (e) {
     return { ok: false, error: "No pude activar el script en Telegram (recarga la pestaña)." };
+  }
+
+  // Fallback: si el cambio por buscador no funcionó, recargamos directo en el bot
+  // (carga completa fiable) y reintentamos una vez sin cambio in-page.
+  if (resp && resp.needsReload) {
+    if (!(await navegarABot(tab.id, handle))) {
+      return { ok: false, error: "Telegram tardó en cargar, reintenta." };
+    }
+    if (!(await esperarTabLista(tab.id))) {
+      return { ok: false, error: "Telegram tardó en cargar, reintenta." };
+    }
+    try {
+      resp = await enviarATelegram(tab.id, correo, handle, null);
+    } catch (e) {
+      return { ok: false, error: "No pude activar el script en Telegram (recarga la pestaña)." };
+    }
   }
 
   resp = resp || { ok: false, error: "Sin respuesta de la pestaña de Telegram." };

@@ -171,13 +171,97 @@
     }
   }
 
+  // ----- Cambiar de chat SIN recargar, usando el buscador de Telegram -----
+  // Best-effort: si no encuentra el buscador o el bot en los resultados, devuelve
+  // false y el background recarga la pestaña (fallback fiable).
+  function setInputValue(el, v) {
+    try {
+      const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
+      if (proto) {
+        Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+      } else {
+        el.value = v;
+        el.textContent = v;
+      }
+    } catch (e) { el.value = v; }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function getBuscador() {
+    return (
+      document.querySelector("#telegram-search-input") ||
+      document.querySelector(".input-search-input") ||
+      document.querySelector(".sidebar-search .input-field-input") ||
+      document.querySelector(".input-search input") ||
+      Array.from(document.querySelectorAll('input, [contenteditable="true"]'))
+        .find((i) => /search|buscar/i.test(i.getAttribute("placeholder") || ""))
+    );
+  }
+
+  // Clic "real" (Telegram K escucha mousedown/mouseup, no basta con .click()).
+  function clicReal(el) {
+    const r = el.getBoundingClientRect();
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+    for (const tipo of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      try { el.dispatchEvent(new MouseEvent(tipo, opts)); } catch (e) {}
+    }
+  }
+
+  async function cambiarBotPorBusqueda(handle) {
+    const target = handle.toLowerCase();
+    const search = getBuscador();
+    if (!search) { LOG("no encontré el buscador"); return false; }
+    LOG("cambiando a @" + handle + " por buscador");
+    search.focus();
+    setInputValue(search, handle);
+
+    // Espera a que aparezca el resultado del bot.
+    let result = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 6000) {
+      const candidatos = document.querySelectorAll(
+        "a.chatlist-chat, li.chatlist-chat, .chatlist-chat, .search-super-item, ul.chatlist li, .chatlist li, .chatlist a"
+      );
+      for (const c of candidatos) {
+        const txt = (c.innerText || c.textContent || "").toLowerCase().replace(/\s+/g, "");
+        if (txt.includes(target)) { result = c; break; }
+      }
+      if (result) break;
+      await sleep(200);
+    }
+    if (!result) { LOG("no hallé @" + handle + " en los resultados del buscador"); return false; }
+
+    // El clic debe ir al elemento clickable (a/li.chatlist-chat), no a un hijo.
+    const clickable = result.closest("a.chatlist-chat, li.chatlist-chat, .chatlist-chat") || result;
+    const prevHash = location.hash;
+    clicReal(clickable);
+
+    // Verifica que el chat cambió por el hash de la URL (Telegram K lo actualiza al
+    // abrir otro chat). No usamos el contenedor de burbujas porque K lo reutiliza.
+    const t1 = Date.now();
+    while (Date.now() - t1 < 6000) {
+      if (location.hash !== prevHash && getInput()) {
+        await sleep(500); // deja renderizar el nuevo chat
+        LOG("cambio de chat confirmado (hash:", location.hash, ")");
+        return true;
+      }
+      await sleep(120);
+    }
+    LOG("el clic no cambió de chat (hash sin cambio)");
+    return false;
+  }
+
   // ----- Flujo principal -----
-  // El cambio de bot lo garantiza el BACKGROUND (abre/recarga la pestaña directo
-  // en el bot correcto). Aquí solo escribimos en el chat que esté abierto: la
-  // navegación in-page por location.hash es poco fiable en Telegram K.
-  async function enviarYLeer(correo, bot) {
+  // Si `switchTo` viene, cambiamos de bot por el buscador (sin recargar). Si no se
+  // puede, devolvemos needsReload y el background recarga la pestaña (fallback).
+  async function enviarYLeer(correo, switchTo) {
     if (!esWebK) {
       return { ok: false, error: "Abre Telegram en la versión K: web.telegram.org/k/" };
+    }
+
+    if (switchTo) {
+      const ok = await cambiarBotPorBusqueda(switchTo);
+      if (!ok) return { ok: false, needsReload: true };
     }
 
     const input = await waitFor(".input-message-container .input-field-input[contenteditable], .input-message-input, #editable-message-text", 8000) || getInput();
@@ -209,9 +293,9 @@
     }
 
     const r = await esperarRespuestaBot(baseCount, 30000);
-    // Copia el mensaje COMPLETO del bot (no solo el código) para pegárselo al cliente.
-    if (r && r.ok && r.texto) {
-      r.copiado = await copiarAlPortapapeles(r.texto);
+    // Copia SOLO el código (no mensajes de error/denegación).
+    if (r && r.ok && r.codigo) {
+      r.copiado = await copiarAlPortapapeles(r.codigo);
     }
     return r;
   }
@@ -219,8 +303,8 @@
   // ----- Mensajería con el background -----
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.type === "tg-enviar" && typeof msg.correo === "string") {
-      LOG("recibido tg-enviar:", msg.correo, "bot:", msg.bot);
-      enviarYLeer(msg.correo, msg.bot)
+      LOG("recibido tg-enviar:", msg.correo, "switchTo:", msg.switchTo || "(ninguno)");
+      enviarYLeer(msg.correo, msg.switchTo)
         .then((r) => { LOG("resultado:", r); sendResponse(r); })
         .catch((e) => { LOG("error:", e); sendResponse({ ok: false, error: String(e) }); });
       return true; // respuesta asíncrona

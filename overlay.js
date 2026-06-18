@@ -411,7 +411,12 @@
   function firmaChat() {
     const header = document.querySelector("#main header");
     if (!header) return "";
-    return cleanText(header.textContent).slice(0, 120);
+    // Solo el TÍTULO del chat (nombre/número), no el header completo: el subtítulo
+    // de presencia ("en línea", "escribiendo…", "haz clic aquí…") cambia solo y
+    // dispararía re-búsquedas falsas.
+    const titulo = header.querySelector('span[dir="auto"]');
+    const txt = titulo ? cleanText(titulo.textContent) : cleanText(header.textContent);
+    return txt.slice(0, 120);
   }
 
   function evaluarChat() {

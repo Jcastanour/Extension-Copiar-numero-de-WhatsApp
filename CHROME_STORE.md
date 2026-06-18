@@ -104,3 +104,43 @@ persistente ni invasiva a otras pestañas o ventanas.
 **Contacto**
 Para cualquier pregunta sobre esta política, escriba al correo de contacto técnico
 publicado en la ficha de la Chrome Web Store.
+
+---
+
+## 6. Formulario de Privacidad — textos listos para pegar (v1.1.0)
+
+> Reemplazan los de la versión anterior. **Actualiza primero el Google Doc** de la
+> política con el texto de la sección 5 (el formulario certifica que coincide con la
+> política publicada).
+
+**Descripción de un solo propósito**
+> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web extrae el número del chat actual y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar el número o el correo al portapapeles y, de forma opcional, solicitar códigos de verificación a los bots de los proveedores en Telegram Web y copiar el código. Todas las acciones las inicia el usuario.
+
+**Justificación de activeTab**
+> Se usa 'activeTab' para actuar sobre la pestaña actual cuando el usuario invoca la extensión (icono o atajo de teclado), leyendo la información necesaria en ese momento sin requerir acceso permanente a todas las pestañas, lo que protege la privacidad del navegador.
+
+**Justificación de scripting**
+> Se usa 'scripting' para inyectar bajo demanda los scripts que leen el número/nombre en el DOM de WhatsApp Web (overlay.js, copynumber.js, copyname.js, content.js, buscarelixir.js) y para automatizar Telegram Web (telegram.js) al solicitar códigos. Sin esta inyección no es posible leer los selectores del DOM ni ejecutar la función.
+
+**Justificación de clipboardWrite**
+> Se usa 'clipboardWrite' para copiar al portapapeles del sistema el número extraído o el código de verificación, de modo que el usuario pueda pegarlo inmediatamente en sus programas.
+
+**Justificación de storage**
+> Se usa 'storage' (chrome.storage.local) para guardar localmente en el navegador la configuración del usuario: la URL del backend, la clave de API, el estado y la posición del panel, y los nombres de los bots de Telegram. No se guarda en servidores de terceros.
+
+**Justificación de tabs**
+> Se usa 'tabs' para localizar, abrir o enfocar la pestaña de Telegram Web y enrutar la solicitud de código al bot del proveedor correcto, además de detectar cuándo terminó de cargar. No se inspecciona el contenido de pestañas ajenas a esta función.
+
+**Justificación de Permiso de host**
+> web.whatsapp.com: leer el número/nombre del chat visible y mostrar el panel. web.telegram.org: automatizar la solicitud de códigos de verificación a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario que devuelve las cuentas asociadas al número. Cada host se declara explícitamente para limitar la acción de la extensión a esos dominios.
+
+**¿Usas código remoto?** → No.
+
+**Uso de datos (casillas a marcar):**
+- ✅ Información de identificación personal — el número de teléfono del contacto (se envía al backend del propietario).
+- ✅ Contenido de sitios web — se lee texto visible del DOM de WhatsApp Web.
+- (No marcar las demás; no se recopilan mensajes, salud, finanzas, ubicación, etc.)
+
+**Certificaciones:** marcar las tres (no vender/transferir a terceros, no usar para fines ajenos, no usar para solvencia).
+
+**URL de política de privacidad:** la misma del Google Doc (tras actualizar su contenido con la sección 5).

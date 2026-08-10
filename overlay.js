@@ -41,8 +41,12 @@
     <style>
       :host, * { box-sizing: border-box; }
       [hidden] { display: none !important; }
+      /* Burbuja, panel y toast viven en (0,0) y se mueven SOLO con transform:
+         composición en GPU, sin layout ni repaint por frame. will-change los
+         promociona a su propia capa desde el arranque (son 3 elementos chicos). */
       .launcher {
-        position: fixed; width: 46px; height: 46px; border-radius: 50%;
+        position: fixed; left: 0; top: 0; will-change: transform;
+        width: 46px; height: 46px; border-radius: 50%;
         background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%);
         color:#fff; font-size:22px; border:none; cursor:grab;
         box-shadow: 0 4px 14px rgba(124,58,237,.45);
@@ -51,7 +55,8 @@
       }
       .launcher.dragging { cursor:grabbing; }
       .panel {
-        position: fixed; width: 300px; max-height: 70vh; display:flex; flex-direction:column;
+        position: fixed; left: 0; top: 0; will-change: transform;
+        width: 300px; max-height: 70vh; display:flex; flex-direction:column;
         background:#fff; color:#1e1b2e; border-radius:14px; overflow:hidden;
         box-shadow: 0 10px 30px rgba(20,16,41,.28);
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
@@ -64,7 +69,8 @@
       }
       .hdr.dragging { cursor:grabbing; }
       .toast {
-        position: fixed; max-width: 220px;
+        position: fixed; left: 0; top: 0; will-change: transform;
+        max-width: 220px;
         background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%); color:#fff;
         border-radius:11px; padding:9px 13px; font-size:12.5px; font-weight:600; line-height:1.3;
         box-shadow: 0 6px 20px rgba(124,58,237,.4);
@@ -139,7 +145,7 @@
       .modal .cancelar { background:#fff; color:#6b7280; border:1px solid #e7e7ef; }
     </style>
     <button class="launcher" id="launcher" title="Mostrar cuentas Elixir" hidden>⚡</button>
-    <div class="panel" id="panel">
+    <div class="panel" id="panel" hidden>
       <div class="hdr">
         <span class="ttl">⚡ Cuentas</span>
         <div class="hdr-actions">
@@ -175,31 +181,61 @@
   const elToast = shadow.getElementById("toast");
   const elModal = shadow.getElementById("modalFondo");
 
-  // ----- Posición (burbuja, panel y toast son position:fixed) -----
+  // ----- Posición (burbuja, panel y toast: fixed en 0,0 + transform) -----
+  // El camino caliente del arrastre no lee NADA del layout: viewport y tamaños
+  // van cacheados (resize y ResizeObserver los refrescan), y escribir transform
+  // no invalida layout — la GPU compone y ya.
   const BW = 46;        // tamaño de la burbuja
   const GAP = 8;        // separación burbuja↔panel/toast
   let pos = { left: 16, top: 16 }; // esquina sup-izq de la burbuja (se fija en init)
+  let vw = window.innerWidth, vh = window.innerHeight; // viewport cacheado
+  let panelW = 300, panelH = 0;                        // tamaño real del panel (ResizeObserver)
+  let toastW = 0, toastH = 0;                          // tamaño del toast (medido al mostrarlo)
 
   function clampPos(left, top) {
-    const maxLeft = Math.max(0, window.innerWidth - BW);
-    const maxTop = Math.max(0, window.innerHeight - BW);
+    const maxLeft = Math.max(0, vw - BW);
+    const maxTop = Math.max(0, vh - BW);
     return { left: Math.min(Math.max(0, left), maxLeft), top: Math.min(Math.max(0, top), maxTop) };
   }
-  function aplicarPosBurbuja() {
-    elLauncher.style.left = pos.left + "px";
-    elLauncher.style.top = pos.top + "px";
+  function mover(el, x, y) {
+    el.style.transform = "translate3d(" + x + "px," + y + "px,0)";
   }
-  // Coloca un elemento flotante (panel/toast) junto a la burbuja, abriendo hacia
-  // el interior de la pantalla. Limpia los 4 anclajes antes de fijar 2.
-  function colocarFlotante(el) {
+  function aplicarPosBurbuja() { mover(elLauncher, pos.left, pos.top); }
+
+  // Coloca un flotante junto a la burbuja abriendo hacia el interior de la
+  // pantalla, con tamaño CACHEADO (nada de offsetWidth/Height por frame) y
+  // acotado al viewport para que nunca quede medio afuera.
+  function colocarFlotante(el, w, h) {
     const cx = pos.left + BW / 2, cy = pos.top + BW / 2;
-    el.style.left = el.style.right = el.style.top = el.style.bottom = "auto";
-    if (cx > window.innerWidth / 2) el.style.right = (window.innerWidth - (pos.left + BW)) + "px";
-    else el.style.left = pos.left + "px";
-    if (cy < window.innerHeight / 2) el.style.top = (pos.top + BW + GAP) + "px";
-    else el.style.bottom = (window.innerHeight - pos.top + GAP) + "px";
+    const x = cx > vw / 2 ? (pos.left + BW) - w : pos.left;
+    const y = cy < vh / 2 ? pos.top + BW + GAP : pos.top - GAP - h;
+    mover(el, Math.min(Math.max(0, x), Math.max(0, vw - w)), Math.min(Math.max(0, y), Math.max(0, vh - h)));
   }
-  function posicionarPanel() { colocarFlotante(elPanel); }
+  function posicionarPanel() {
+    if (!panelH) { // primer uso antes de que el observer reporte: medir una vez
+      panelH = elPanel.offsetHeight || 0;
+      panelW = elPanel.offsetWidth || panelW;
+    }
+    colocarFlotante(elPanel, panelW, panelH);
+  }
+  function posicionarToast() { colocarFlotante(elToast, toastW, toastH); }
+
+  // El contenido del panel cambia (mensajes, tarjetas): cuando su tamaño cambia,
+  // reposicionar con el tamaño que reporta el observer — cero lecturas de layout.
+  // Durante el arrastre no dispara (el tamaño no cambia), así que no molesta.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver((entradas) => {
+      const caja = entradas[entradas.length - 1].borderBoxSize;
+      const w = caja && caja.length ? caja[0].inlineSize : elPanel.offsetWidth;
+      const h = caja && caja.length ? caja[0].blockSize : elPanel.offsetHeight;
+      // Al ocultarse (display:none) el observer reporta 0x0: se ignora para no
+      // pisar la caché — así reabrir usa el último tamaño bueno al instante,
+      // sin volver a medir layout en cada apertura.
+      if (!w || !h) return;
+      panelW = w; panelH = h;
+      if (state === "panel" && !elPanel.hidden) posicionarPanel();
+    }).observe(elPanel);
+  }
 
   // ----- Estado persistido (chrome.storage.local) -----
   // "bubble" (defecto): solo la burbuja, sin lookup automático.
@@ -277,7 +313,11 @@
   function mostrarAviso(texto, ms) {
     elToast.textContent = texto;
     elToast.hidden = false;
-    colocarFlotante(elToast);
+    // Se mide UNA vez al mostrarlo (el texto cambió); durante el arrastre se
+    // reusa este tamaño cacheado y el toast viaja con la burbuja sin medir nada.
+    toastW = elToast.offsetWidth;
+    toastH = elToast.offsetHeight;
+    posicionarToast();
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { elToast.hidden = true; }, ms || 3000);
   }
@@ -532,7 +572,9 @@
       }
       firmaCargada = firmaChat(); // cache: reabrir el mismo chat no re-busca
       renderCuentas(numero, data.accounts);
-      posicionarPanel();
+      // Solo si el panel sigue abierto: si se minimizó mientras la respuesta
+      // venía en vuelo, no hay que medir/posicionar un panel oculto.
+      if (state === "panel") posicionarPanel();
     });
   }
 
@@ -559,6 +601,11 @@
   // debounce con maxWait para no morir bajo mutaciones constantes
   let timer = null, primerScheduled = 0;
   function schedule() {
+    // WhatsApp muta el DOM sin parar (presencia, animaciones, mensajes). Con el
+    // panel cerrado no hay nada que evaluar: salir aquí evita mantener un timer
+    // girando permanentemente en segundo plano — CPU regalada en equipos flojos.
+    // Al abrir el panel, setState ya llama a evaluarChat() directo: no se pierde nada.
+    if (state !== "panel") return;
     const ahora = performance.now();
     if (!timer) primerScheduled = ahora;
     if (timer) clearTimeout(timer);
@@ -589,33 +636,64 @@
   }
 
   // Hace arrastrable un elemento moviendo `pos` por delta. onClick (sin arrastre) opcional.
+  //
+  // Fluidez: pointermove puede disparar a 120–1000 Hz (mouse gamer, pantalla de
+  // alta tasa) — mucho más rápido de lo que la pantalla puede pintar. Escribir
+  // estilos en cada evento desperdicia CPU y produce tirones en equipos flojos.
+  // Aquí cada evento solo ANOTA la última coordenada; requestAnimationFrame
+  // aplica UNA escritura por frame de pantalla, exactamente sincronizada con el
+  // refresco. Todo lo que se mueve (burbuja, panel, toast) se mueve en el mismo
+  // frame para que nada quede rezagado.
   function hacerArrastrable(handle, onClick) {
     let d = null;
+
+    function frame() {
+      if (!d) return; // el arrastre terminó con un rAF aún en vuelo
+      d.raf = 0;
+      pos = clampPos(d.baseLeft + (d.lx - d.x), d.baseTop + (d.ly - d.y));
+      aplicarPosBurbuja();
+      if (state === "panel") posicionarPanel();
+      if (!elToast.hidden) posicionarToast(); // la nota viaja con la burbuja
+    }
+
+    function terminar(aplicarFinal) {
+      if (!d) return false;
+      if (d.raf) { cancelAnimationFrame(d.raf); d.raf = 0; }
+      const movido = d.moved;
+      if (movido && aplicarFinal) frame(); // aplica la última coordenada ya mismo
+      d = null;
+      handle.classList.remove("dragging");
+      if (movido) persistirPos();
+      return movido;
+    }
+
     handle.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       if (e.target.closest(".hdr-actions")) return; // no arrastrar desde los botones del panel
-      d = { x: e.clientX, y: e.clientY, baseLeft: pos.left, baseTop: pos.top, moved: false };
+      d = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY,
+            baseLeft: pos.left, baseTop: pos.top, moved: false, raf: 0 };
       handle.setPointerCapture(e.pointerId);
     });
     handle.addEventListener("pointermove", (e) => {
       if (!d) return;
-      const dx = e.clientX - d.x, dy = e.clientY - d.y;
-      if (!d.moved && Math.hypot(dx, dy) < DRAG_UMBRAL) return;
-      d.moved = true;
-      handle.classList.add("dragging");
-      pos = clampPos(d.baseLeft + dx, d.baseTop + dy);
-      aplicarPosBurbuja();
-      if (state === "panel") posicionarPanel();
+      d.lx = e.clientX; d.ly = e.clientY;
+      if (!d.moved) {
+        if (Math.hypot(d.lx - d.x, d.ly - d.y) < DRAG_UMBRAL) return;
+        d.moved = true;
+        handle.classList.add("dragging"); // una sola vez, no en cada move
+      }
+      if (!d.raf) d.raf = requestAnimationFrame(frame);
     });
     handle.addEventListener("pointerup", (e) => {
       if (!d) return;
-      const movido = d.moved;
-      d = null;
-      handle.classList.remove("dragging");
+      const movido = terminar(true); // aplica la última posición sin esperar otro frame
       try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
-      if (movido) persistirPos();
-      else if (onClick) onClick();
+      if (!movido && onClick) onClick();
     });
+    // Sin esto, si el navegador cancela el puntero a mitad de arrastre (alt-tab,
+    // gesto del sistema), `d` quedaba vivo y la burbuja seguía al cursor SIN
+    // botón presionado — la burbuja "pegada" al mouse.
+    handle.addEventListener("pointercancel", () => terminar(false));
   }
 
   hacerArrastrable(elLauncher, () => setState("panel")); // clic en la burbuja abre el panel
@@ -628,12 +706,15 @@
     setState("bubble");
   }, true);
 
-  // Reubica el panel/aviso si cambia el tamaño de la ventana.
+  // Reubica el panel/aviso si cambia el tamaño de la ventana (y refresca el
+  // viewport cacheado que usa el camino caliente del arrastre).
   window.addEventListener("resize", () => {
+    vw = window.innerWidth;
+    vh = window.innerHeight;
     pos = clampPos(pos.left, pos.top);
     aplicarPosBurbuja();
     if (state === "panel") posicionarPanel();
-    if (!elToast.hidden) colocarFlotante(elToast);
+    if (!elToast.hidden) posicionarToast();
   });
 
   // ----- Atajo de teclado en página: Ctrl/Cmd+Shift+Space -----
@@ -662,7 +743,7 @@
 
   // Posición por defecto: esquina inferior-derecha, arriba del compositor.
   function posDefecto() {
-    return clampPos(window.innerWidth - 16 - BW, window.innerHeight - 96 - BW);
+    return clampPos(vw - 16 - BW, vh - 96 - BW);
   }
 
   function arrancar() {

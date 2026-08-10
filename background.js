@@ -41,6 +41,66 @@ async function lookupCuentas(numero) {
 }
 
 // ---------------------------------------------------------------------------
+// Códigos de Netflix leídos del buzón central (ApiExtractMail).
+// Va aquí y no en el content script por dos razones: el service worker tiene
+// host_permissions, así que no le aplica CORS (la API solo permite el origen de
+// la página Elixir), y así la API key no viaja nunca a web.whatsapp.com.
+// ---------------------------------------------------------------------------
+const CODIGOS_URL_DEFECTO = "https://codigos.elixircuentas.com";
+
+async function codigoPorCorreo(correo) {
+  const { codigosUrl, codigosApiKey } = await chrome.storage.local.get(["codigosUrl", "codigosApiKey"]);
+  const base = (codigosUrl || CODIGOS_URL_DEFECTO).replace(/\/+$/, "");
+  if (!codigosApiKey) {
+    return { ok: false, error: "Falta la API key de códigos (⚙️ Ajustes)." };
+  }
+
+  const url = base + "/api/code?email=" + encodeURIComponent(correo);
+
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { "X-Api-Key": codigosApiKey } });
+  } catch (e) {
+    return { ok: false, error: "Sin conexión con el servicio de códigos." };
+  }
+
+  if (resp.status === 401) return { ok: false, error: "API key de códigos inválida." };
+  if (resp.status === 503) return { ok: false, error: "El servicio de códigos está deshabilitado." };
+  if (!resp.ok) return { ok: false, error: `Error del servicio (HTTP ${resp.status}).` };
+
+  let data;
+  try {
+    data = await resp.json();
+  } catch (e) {
+    return { ok: false, error: "Respuesta inválida del servicio de códigos." };
+  }
+
+  if (!data || !data.success) {
+    return { ok: false, error: mensajeDeErrorCodigo(data), motivo: data && data.error };
+  }
+  // code (signin/travel) o link (household); name y device sirven para comprobar
+  // que el código es del perfil del cliente que está escribiendo.
+  return {
+    ok: true,
+    tipo: data.type || null,
+    codigo: data.codigo || data.code || null,
+    link: data.link || null,
+    perfil: data.name || null,
+    dispositivo: data.device || null,
+  };
+}
+
+// Los códigos de error de la API son internos; aquí se traducen a algo accionable.
+function mensajeDeErrorCodigo(data) {
+  const motivo = data && data.error;
+  if (motivo === "no_email") return "No llegó ningún código reciente para esta cuenta.";
+  if (motivo === "blocked_device") return "Llegó un código, pero el dispositivo está bloqueado por tus reglas.";
+  if (motivo === "gmail_error") return "El servicio no pudo leer el correo. Revisa el panel de códigos.";
+  if (motivo === "signin_help") return (data && data.message) || "Netflix pide verificación de inicio de sesión.";
+  return (data && data.message) || "No se encontró código para esta cuenta.";
+}
+
+// ---------------------------------------------------------------------------
 // PROTOTIPO Telegram (Bloque 2, detrás de flag): el overlay manda el correo,
 // aquí localizamos la pestaña de Telegram Web y reenviamos la orden al content
 // script telegram.js, que pega/envía y lee el código. Devolvemos el código.
@@ -196,6 +256,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === "tg-pedir-codigo" && typeof msg.correo === "string") {
     pedirCodigoTelegram(msg.correo, msg.bot, sender).then(sendResponse).catch((err) =>
+      sendResponse({ ok: false, error: String(err) })
+    );
+    return true; // respuesta asíncrona
+  }
+  if (msg && msg.type === "codigo-correo" && typeof msg.correo === "string") {
+    codigoPorCorreo(msg.correo).then(sendResponse).catch((err) =>
       sendResponse({ ok: false, error: String(err) })
     );
     return true; // respuesta asíncrona

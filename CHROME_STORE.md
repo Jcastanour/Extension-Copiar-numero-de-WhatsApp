@@ -1,24 +1,26 @@
-# Publicación en Chrome Web Store — v1.3.0
+# Publicación en Chrome Web Store — v1.4.0
 
 Documento de apoyo para subir la versión y completar el formulario de la tienda
 (justificaciones de permisos, divulgación de datos y política de privacidad).
 
-> ✅ **La v1.3.0 tampoco cambia permisos ni datos.** Mismos 5 permisos y mismos 4
-> hosts desde la v1.1.0. **No hay que volver a certificar nada.** Solo se añade una
-> frase al propósito único y un punto a la política, por la utilidad nueva.
+> ⚠️ **La v1.4.0 SÍ añade un permiso de host nuevo**: `https://codigos.elixircuentas.com/*`.
+> Es la primera versión desde la 1.1.0 que toca permisos, así que la revisión puede
+> tardar más de lo habitual. Los 5 permisos de API siguen siendo los mismos.
 >
-> Qué trae esta versión: se puede volver a mostrar el panel flotante desde el icono
-> de la extensión (antes, al ocultarlo, la única salida era un atajo de teclado y el
-> estado sobrevivía a recargar, así que quedaba inaccesible); Auto-Telegram viene
-> activado de fábrica; y hay un decodificador de códigos de recarga que funciona
-> íntegramente en el navegador, sin enviar nada a ningún servidor.
+> Qué trae: las cuentas de Netflix ya no piden el código por Telegram. La extensión
+> consulta el servicio propio de códigos (que lee el buzón central del negocio) y
+> devuelve el código al instante. Los demás proveedores siguen por Telegram, porque
+> ese servicio solo entiende los correos de Netflix.
+>
+> **Dato nuevo que declarar**: se envía a ese servicio el **correo de la cuenta de
+> streaming** (dato del negocio, no del cliente final).
 
 ---
 
 ## 1. Build
 
-- Archivo a subir: `dist/copiar-numero-whatsapp-1.3.0.zip` (manifest.json en la raíz).
-- Versión: `1.3.0`.
+- Archivo a subir: `dist/copiar-numero-whatsapp-1.4.0.zip` (manifest.json en la raíz).
+- Versión: `1.4.0`.
 
 ## 2. Propósito único (Single purpose)
 
@@ -45,6 +47,7 @@ proveedores en Telegram.
 | `*://web.whatsapp.com/*` | Leer el número, el nombre y el nombre de usuario visibles del chat y mostrar el panel overlay. |
 | `*://web.telegram.org/*` | Automatizar la solicitud de códigos a los bots de los proveedores. |
 | `https://elixircuentas.com/*` | Consultar la API de cuentas (`/api/extension/lookup`). |
+| `https://codigos.elixircuentas.com/*` | Consultar el servicio propio que extrae del buzón del negocio el código de verificación de Netflix (`/api/code`). |
 | `https://elixircuentas-test.fly.dev/*` | Mismo fin, entorno de pruebas. |
 
 ## 4. Divulgación de datos (Data usage en el Dashboard)
@@ -118,14 +121,19 @@ conversaciones a terceros.
 
 **6. Transmisión y compartición de datos**
 El número de teléfono se transmite únicamente al backend del propietario para la
-función descrita. No vendemos ni transferimos los datos del usuario a terceros, ni
+función descrita. Cuando el usuario pulsa "Ver código", se envía además el correo de
+la cuenta de streaming al servicio de códigos del propietario
+(codigos.elixircuentas.com), que responde con el código de verificación recibido en
+el buzón del negocio; ese correo es un dato del propio negocio, no del cliente
+final. No vendemos ni transferimos los datos del usuario a terceros, ni
 los usamos para publicidad, marketing o evaluación de solvencia, ni para ningún fin
 ajeno a la funcionalidad principal declarada.
 
 **7. Permisos**
 La Extensión solicita los permisos mínimos necesarios para su función: `activeTab`,
 `scripting`, `clipboardWrite`, `storage` y `tabs`, además de acceso a los dominios
-web.whatsapp.com, web.telegram.org y el backend del propietario. No accede de forma
+web.whatsapp.com, web.telegram.org y los backends del propietario
+(elixircuentas.com y codigos.elixircuentas.com). No accede de forma
 persistente ni invasiva a otras pestañas o ventanas.
 
 **Contacto**
@@ -134,16 +142,17 @@ publicado en la ficha de la Chrome Web Store.
 
 ---
 
-## 6. Formulario de Privacidad — textos listos para pegar (v1.3.0)
+## 6. Formulario de Privacidad — textos listos para pegar (v1.4.0)
 
-> Frente a la v1.2.0 **solo** cambia la descripción de propósito único (una frase
-> al final, por el decodificador). Las justificaciones de permisos, las casillas de
-> uso de datos y las tres certificaciones se quedan **igual**. **Actualiza primero el Google Doc** de la
+> Frente a la v1.3.0 cambian el propósito único, la justificación del permiso de
+> host (hay un dominio nuevo) y el punto 6 de la política. Las casillas de uso de
+> datos y las tres certificaciones se quedan **igual**: no aparece ninguna categoría
+> de datos nueva. **Actualiza primero el Google Doc** de la
 > política con el texto de la sección 5 (el formulario certifica que coincide con la
 > política publicada).
 
 **Descripción de un solo propósito**
-> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Incluye además una utilidad local que decodifica los códigos de recarga que el proveedor entrega codificados, sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
+> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Para las cuentas de Netflix obtiene el código de verificación consultando un servicio del propietario que lee el buzón del negocio, sin abrir Telegram. Incluye además una utilidad local que decodifica los códigos de recarga que el proveedor entrega codificados, sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
 
 **Justificación de activeTab**
 > Se usa 'activeTab' para actuar sobre la pestaña actual cuando el usuario invoca la extensión (icono o atajo de teclado), leyendo la información necesaria en ese momento sin requerir acceso permanente a todas las pestañas, lo que protege la privacidad del navegador.
@@ -161,7 +170,8 @@ publicado en la ficha de la Chrome Web Store.
 > Se usa 'tabs' para localizar, abrir o enfocar la pestaña de Telegram Web y enrutar la solicitud de código al bot del proveedor correcto, además de detectar cuándo terminó de cargar. No se inspecciona el contenido de pestañas ajenas a esta función.
 
 **Justificación de Permiso de host**
-> web.whatsapp.com: leer el número, el nombre y el nombre de usuario del chat visible, y mostrar el panel. web.telegram.org: automatizar la solicitud de códigos de verificación a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario que devuelve las cuentas asociadas al número. Cada host se declara explícitamente para limitar la acción de la extensión a esos dominios.
+> web.whatsapp.com: leer el número, el nombre y el nombre de usuario del chat visible, y mostrar el panel.
+> codigos.elixircuentas.com: consultar el servicio del propietario que devuelve el código de verificación de Netflix asociado al correo de una cuenta del negocio. web.telegram.org: automatizar la solicitud de códigos de verificación a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario que devuelve las cuentas asociadas al número. Cada host se declara explícitamente para limitar la acción de la extensión a esos dominios.
 
 **¿Usas código remoto?** → No.
 

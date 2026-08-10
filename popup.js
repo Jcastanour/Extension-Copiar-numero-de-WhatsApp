@@ -39,11 +39,13 @@ function hasChromeStorage() {
 function getConfig() {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.get(["baseUrl", "apiKey", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
+      chrome.storage.local.get(["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
     } else {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
         apiKey: localStorage.getItem("apiKey") || "",
+        codigosUrl: localStorage.getItem("codigosUrl") || "",
+        codigosApiKey: localStorage.getItem("codigosApiKey") || "",
         tgEnabled: localStorage.getItem("tgEnabled") !== "false", // encendido salvo que se apague
         tgBotKh: localStorage.getItem("tgBotKh") || "",
         tgBotWolf: localStorage.getItem("tgBotWolf") || "",
@@ -114,6 +116,27 @@ function botParaCuenta(acc) {
   }
   return bot;
 }
+// ¿Es una cuenta de Netflix? Basta con que el nombre o la categoría contengan
+// "netflix": así entran todas las variantes del catálogo (Netflix Exterior,
+// Netflix Cel, Netflix NR / No Renovable, Netflix Extra…). Mismo criterio que
+// usa _is_disney() en el backend.
+function esNetflix(acc) {
+  const txt = ((acc.account_type_name || "") + " " + (acc.category || ""))
+    .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return txt.indexOf("netflix") !== -1;
+}
+
+// Netflix se resuelve leyendo el buzón (instantáneo). El resto de proveedores no
+// están soportados por ese servicio, así que siguen por Telegram.
+function botonCodigo(acc, email) {
+  if (!email) return "";
+  if (esNetflix(acc)) {
+    return `<button class="pedir correo" data-email="${email}">📬 Ver código (correo)</button>`;
+  }
+  if (!tgEnabled) return "";
+  return `<button class="pedir" data-email="${email}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>`;
+}
+
 // Nombre del proveedor para mostrar en la tarjeta (badge).
 function nombreProveedor(acc) {
   return acc.provider || acc.provider_name || acc.proveedor || "";
@@ -159,7 +182,7 @@ function renderCuentas(accounts) {
           <button class="copiar" data-email="${email}" data-idx="${i}">
             Copiar correo
           </button>
-          ${tgEnabled ? `<button class="pedir" data-email="${email}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>` : ""}
+          ${botonCodigo(acc, email)}
           <div class="codigo-slot"></div>
         </div>`;
     })
@@ -184,9 +207,11 @@ function renderCuentas(accounts) {
     });
   });
 
-  // Listeners de "Pedir código (Telegram)"
+  // Listeners de los botones de código: por correo (Netflix) o por Telegram.
   document.querySelectorAll("#resultados .pedir").forEach((btn) => {
-    btn.addEventListener("click", () => pedirCodigoTelegram(btn));
+    btn.addEventListener("click", () =>
+      btn.classList.contains("correo") ? pedirCodigoCorreo(btn) : pedirCodigoTelegram(btn)
+    );
   });
 
   // Repinta el código pedido en una sesión anterior del popup (si es reciente).
@@ -214,6 +239,64 @@ function pintarResultadoTG(slot, resp) {
   } else {
     slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 90))}${nota}</small></div>`;
   }
+}
+
+// Netflix: el código se lee del buzón central. Una petición y listo, sin abrir
+// Telegram ni salir de aquí.
+function pedirCodigoCorreo(btn) {
+  const email = btn.getAttribute("data-email");
+  if (!email) return;
+  const slot = btn.parentElement.querySelector(".codigo-slot");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Buscando…";
+
+  chrome.runtime.sendMessage({ type: "codigo-correo", correo: email }, (resp) => {
+    btn.disabled = false;
+    btn.textContent = original;
+    if (chrome.runtime.lastError) {
+      if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`;
+      return;
+    }
+    pintarResultadoCorreo(slot, resp);
+  });
+}
+
+function pintarResultadoCorreo(slot, resp) {
+  if (!slot) return;
+  if (!resp || !resp.ok) {
+    slot.innerHTML = `<div class="msg error">${escapeHtml((resp && resp.error) || "No se pudo consultar.")}</div>`;
+    return;
+  }
+
+  // De quién es el código: evita entregarle a un cliente el de otro perfil.
+  const quien = [resp.perfil, resp.dispositivo].filter(Boolean).map(escapeHtml).join(" · ");
+  const pie = quien ? `<div class="pin-nota">${quien}</div>` : "";
+
+  if (resp.codigo) {
+    slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>${pie}`;
+    slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+      await copiarTexto(resp.codigo);
+      e.target.textContent = "✓";
+      setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+    });
+    copiarTexto(resp.codigo);
+    return;
+  }
+
+  if (resp.link) {
+    // Nunca se abre solo: el enlace de hogar confirma el cambio al pulsarlo y el
+    // de viaje es de un solo uso. Lo abre el operador cuando toca.
+    slot.innerHTML = `
+      <div class="codigo"><span>${resp.tipo === "household" ? "Confirmar hogar" : "Enlace"}</span>
+      <button class="ccopy">Abrir</button></div>${pie}`;
+    slot.querySelector(".ccopy").addEventListener("click", () => {
+      chrome.tabs.create({ url: resp.link });
+    });
+    return;
+  }
+
+  slot.innerHTML = `<div class="msg">Llegó un correo pero sin código utilizable.</div>`;
 }
 
 function pedirCodigoTelegram(btn) {
@@ -454,6 +537,8 @@ async function cargarConfigEnInputs() {
   const cfg = await getConfig();
   if (cfg.baseUrl) document.getElementById("cfgBaseUrl").value = cfg.baseUrl;
   if (cfg.apiKey) document.getElementById("cfgApiKey").value = cfg.apiKey;
+  document.getElementById("cfgCodigosUrl").value = cfg.codigosUrl || "https://codigos.elixircuentas.com";
+  if (cfg.codigosApiKey) document.getElementById("cfgCodigosApiKey").value = cfg.codigosApiKey;
   // !!cfg.tgEnabled dejaría en false a quien nunca lo configuró: solo apagamos
   // si hay un false guardado a propósito.
   tgEnabled = cfg.tgEnabled !== false;
@@ -467,13 +552,15 @@ async function cargarConfigEnInputs() {
 async function guardarConfig() {
   const baseUrl = document.getElementById("cfgBaseUrl").value.trim().replace(/\/+$/, "");
   const apiKey = document.getElementById("cfgApiKey").value.trim();
+  const codigosUrl = document.getElementById("cfgCodigosUrl").value.trim().replace(/\/+$/, "");
+  const codigosApiKey = document.getElementById("cfgCodigosApiKey").value.trim();
   const tgEnabledNuevo = document.getElementById("cfgTgEnabled").checked;
   const tgBotKhNuevo = document.getElementById("cfgTgBotKh").value.trim().replace(/^@/, "");
   const tgBotWolfNuevo = document.getElementById("cfgTgBotWolf").value.trim().replace(/^@/, "");
   tgEnabled = tgEnabledNuevo;
   if (tgBotKhNuevo) tgBotKh = tgBotKhNuevo;
   if (tgBotWolfNuevo) tgBotWolf = tgBotWolfNuevo;
-  await setConfig({ baseUrl, apiKey, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
+  await setConfig({ baseUrl, apiKey, codigosUrl, codigosApiKey, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {

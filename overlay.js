@@ -224,6 +224,26 @@
     }
     return bot;
   }
+  // ¿Cuenta de Netflix? Basta con que el nombre o la categoría contengan
+  // "netflix", para que entren todas las variantes del catálogo (Exterior, Cel,
+  // NR / No Renovable, Extra…). Mismo criterio que _is_disney() en el backend.
+  function esNetflix(acc) {
+    const txt = ((acc.account_type_name || "") + " " + (acc.category || ""))
+      .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return txt.indexOf("netflix") !== -1;
+  }
+
+  // Netflix se resuelve leyendo el buzón central: instantáneo y sin salir de
+  // WhatsApp. Los demás proveedores no están soportados ahí y siguen por Telegram.
+  function botonCodigo(acc, email) {
+    if (!email) return "";
+    if (esNetflix(acc)) {
+      return `<button class="pedir correo" data-email="${email}">📬 Ver código (correo)</button>`;
+    }
+    if (!tgEnabled) return "";
+    return `<button class="pedir" data-email="${email}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>`;
+  }
+
   // Nombre del proveedor para mostrar en la tarjeta (badge).
   function nombreProveedor(acc) {
     return acc.provider || acc.provider_name || acc.proveedor || "";
@@ -377,7 +397,7 @@
             ${nombreProveedor(acc) ? `<span class="badge prov">${escapeHtml(nombreProveedor(acc))}</span>` : ""}
           </div>
           <button class="copy" data-email="${escapeHtml(acc.provider_email || "")}">Copiar correo</button>
-          ${tgEnabled ? `<button class="pedir" data-email="${escapeHtml(acc.provider_email || "")}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>` : ""}
+          ${botonCodigo(acc, escapeHtml(acc.provider_email || ""))}
           <div class="codigo-slot"></div>
         </div>`;
     }).join("");
@@ -395,7 +415,57 @@
     });
 
     shadow.querySelectorAll(".pedir").forEach((btn) => {
-      btn.addEventListener("click", () => pedirCodigo(btn));
+      btn.addEventListener("click", () =>
+        btn.classList.contains("correo") ? pedirCodigoCorreo(btn) : pedirCodigo(btn)
+      );
+    });
+  }
+
+  // ----- Netflix: código leído del buzón central, sin abrir Telegram -----
+  function pedirCodigoCorreo(btn) {
+    const email = btn.getAttribute("data-email");
+    if (!email) return;
+    const slot = btn.parentElement.querySelector(".codigo-slot");
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Buscando…";
+
+    chrome.runtime.sendMessage({ type: "codigo-correo", correo: email }, (resp) => {
+      btn.disabled = false;
+      btn.textContent = original;
+      if (chrome.runtime.lastError) {
+        if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`;
+        return;
+      }
+      if (!resp || !resp.ok) {
+        if (slot) slot.innerHTML = `<div class="msg error">${escapeHtml((resp && resp.error) || "No se pudo consultar.")}</div>`;
+        return;
+      }
+
+      // Perfil y dispositivo: para comprobar que el código es del cliente que escribe.
+      const quien = [resp.perfil, resp.dispositivo].filter(Boolean).map(escapeHtml).join(" · ");
+      const pie = quien ? `<div class="num">${quien}</div>` : "";
+
+      if (resp.codigo) {
+        slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>${pie}`;
+        slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+          await copiar(resp.codigo);
+          e.target.textContent = "✓";
+          setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+        });
+        copiar(resp.codigo);
+        return;
+      }
+
+      if (resp.link) {
+        // No se abre solo: el de hogar confirma el cambio al pulsarlo y el de
+        // viaje es de un solo uso. Lo abre el operador cuando corresponde.
+        slot.innerHTML = `<div class="codigo"><span>${resp.tipo === "household" ? "Confirmar hogar" : "Enlace"}</span><button class="ccopy">Abrir</button></div>${pie}`;
+        slot.querySelector(".ccopy").addEventListener("click", () => window.open(resp.link, "_blank"));
+        return;
+      }
+
+      slot.innerHTML = `<div class="msg">Llegó un correo pero sin código utilizable.</div>`;
     });
   }
 

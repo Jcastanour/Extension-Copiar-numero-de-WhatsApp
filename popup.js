@@ -44,7 +44,7 @@ function getConfig() {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
         apiKey: localStorage.getItem("apiKey") || "",
-        tgEnabled: localStorage.getItem("tgEnabled") === "true",
+        tgEnabled: localStorage.getItem("tgEnabled") !== "false", // encendido salvo que se apague
         tgBotKh: localStorage.getItem("tgBotKh") || "",
         tgBotWolf: localStorage.getItem("tgBotWolf") || "",
       });
@@ -95,8 +95,8 @@ function textoDias(d) {
   return `Venció hace ${Math.abs(d)}d`;
 }
 
-// Flag prototipo Telegram (Bloque 2), se carga desde config en cargarConfigEnInputs.
-let tgEnabled = false;
+// Telegram va encendido por defecto; solo se apaga si el usuario lo desmarca.
+let tgEnabled = true;
 let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
 let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
 
@@ -389,13 +389,74 @@ async function lookupDeNumero(numero) {
 }
 
 // ---------------------------------------------------------------------------
+// Decodificar el PIN de recarga (base64). Todo local: no sale de este navegador.
+// El popup se cierra al cambiar de pestaña, así que el resultado se guarda con
+// caducidad para que siga ahí al volver (copiar el pin en Refácil → ir a Netflix).
+// ---------------------------------------------------------------------------
+const PIN_TTL_MS = 30 * 60 * 1000;
+
+function pintarPin(texto, guardado) {
+  const slot = document.getElementById("pinResultado");
+  slot.innerHTML = `
+    <div class="pin-out"><b>${escapeHtml(texto)}</b><button class="ccopy">Copiar</button></div>
+    <div class="pin-nota">${guardado ? "Del pin anterior · " : ""}copiado al portapapeles ✓</div>`;
+  slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+    await copiarTexto(texto);
+    e.target.textContent = "✓";
+    setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+  });
+}
+
+function pintarPinError(motivo) {
+  const msg = motivo === "no-base64"
+    ? "Eso no parece un PIN codificado. Copia el valor del recibo tal cual."
+    : motivo === "no-texto"
+      ? "Se decodificó pero no dio un texto legible."
+      : "Pega el PIN del recibo.";
+  document.getElementById("pinResultado").innerHTML = `<div class="msg error">${msg}</div>`;
+}
+
+async function decodificarPinDelInput() {
+  const crudo = document.getElementById("pinInput").value;
+  const u = window.__elixirUtils;
+  if (!u) return pintarPinError("");
+
+  const r = u.decodificarPin(crudo);
+  if (!r.ok) return pintarPinError(r.motivo);
+
+  await copiarTexto(r.texto);
+  pintarPin(r.texto, false);
+  try {
+    await chrome.storage.local.set({ ultimoPin: { texto: r.texto, ts: Date.now() } });
+  } catch (e) { /* sin caché seguimos funcionando */ }
+}
+
+async function restaurarUltimoPin() {
+  let cfg;
+  try { cfg = await chrome.storage.local.get("ultimoPin"); } catch (e) { return; }
+  const p = cfg && cfg.ultimoPin;
+  if (!p || !p.texto || !p.ts || Date.now() - p.ts > PIN_TTL_MS) return;
+  const slot = document.getElementById("pinResultado");
+  slot.innerHTML = `
+    <div class="pin-out"><b>${escapeHtml(p.texto)}</b><button class="ccopy">Copiar</button></div>
+    <div class="pin-nota">Último PIN de esta sesión.</div>`;
+  slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+    await copiarTexto(p.texto);
+    e.target.textContent = "✓";
+    setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Config: cargar / guardar
 // ---------------------------------------------------------------------------
 async function cargarConfigEnInputs() {
   const cfg = await getConfig();
   if (cfg.baseUrl) document.getElementById("cfgBaseUrl").value = cfg.baseUrl;
   if (cfg.apiKey) document.getElementById("cfgApiKey").value = cfg.apiKey;
-  tgEnabled = !!cfg.tgEnabled;
+  // !!cfg.tgEnabled dejaría en false a quien nunca lo configuró: solo apagamos
+  // si hay un false guardado a propósito.
+  tgEnabled = cfg.tgEnabled !== false;
   if (cfg.tgBotKh && cfg.tgBotKh.trim()) tgBotKh = cfg.tgBotKh.trim().replace(/^@/, "");
   if (cfg.tgBotWolf && cfg.tgBotWolf.trim()) tgBotWolf = cfg.tgBotWolf.trim().replace(/^@/, "");
   document.getElementById("cfgTgEnabled").checked = tgEnabled;
@@ -426,6 +487,12 @@ async function guardarConfig() {
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", function () {
   cargarConfigEnInputs();
+  restaurarUltimoPin();
+
+  document.getElementById("pinBtn").addEventListener("click", decodificarPinDelInput);
+  document.getElementById("pinInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") decodificarPinDelInput();
+  });
 
   // Todas las acciones inyectan numero-utils.js delante: es donde vive la lógica
   // y el guard versionado hace que repetirlo no cueste nada.
@@ -444,6 +511,23 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("copyNumber").addEventListener("click", () => ejecutarEnPestana("copynumber.js"));
   document.getElementById("copyUsername").addEventListener("click", () => ejecutarEnPestana("copyusername.js"));
   document.getElementById("buscarElixir").addEventListener("click", () => ejecutarEnPestana("buscarelixir.js"));
+
+  // Reabre el panel flotante. El overlay escucha overlayState en
+  // chrome.storage.onChanged, así que reaparece sin recargar WhatsApp.
+  document.getElementById("btnMostrarPanel").addEventListener("click", async function () {
+    try {
+      const { overlayState } = await chrome.storage.local.get("overlayState");
+      if (overlayState === "bubble" || overlayState === "panel") {
+        // No lo tocamos: escribir "bubble" estando en "panel" lo minimizaría.
+        setMensaje("El panel ya está visible en WhatsApp Web.");
+        return;
+      }
+      await chrome.storage.local.set({ overlayState: "bubble" });
+      setMensaje("Panel activado. Míralo en la pestaña de WhatsApp Web.");
+    } catch (e) {
+      setMensaje("No se pudo activar el panel.", true);
+    }
+  });
 
   document.getElementById("buscarCuentas").addEventListener("click", buscarCuentas);
   document.getElementById("cfgGuardar").addEventListener("click", guardarConfig);

@@ -206,7 +206,7 @@
   // "panel": panel abierto; al entrar se dispara el lookup del chat actual.
   // "hidden": nada visible; solo se sale con el atajo de teclado.
   let state = "bubble";
-  let tgEnabled = false;          // flag prototipo Telegram (Bloque 2)
+  let tgEnabled = true;           // Telegram encendido por defecto (se apaga en Ajustes)
   let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
   let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
 
@@ -251,13 +251,15 @@
   }
 
   // ----- Aviso flotante (toast) junto a la burbuja -----
+  const TECLA_ATAJO = navigator.platform.indexOf("Mac") === 0 ? "Cmd+Shift+Espacio" : "Ctrl+Shift+Espacio";
+
   let toastTimer = null;
-  function mostrarAviso(texto) {
+  function mostrarAviso(texto, ms) {
     elToast.textContent = texto;
     elToast.hidden = false;
     colocarFlotante(elToast);
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { elToast.hidden = true; }, 3000);
+    toastTimer = setTimeout(() => { elToast.hidden = true; }, ms || 3000);
   }
 
   // ----- Modal para teclear el número que WhatsApp no expone -----
@@ -499,7 +501,14 @@
 
   // ----- Botones -----
   shadow.getElementById("btnCollapse").addEventListener("click", () => setState("bubble")); // — minimiza a burbuja
-  shadow.getElementById("btnClose").addEventListener("click", () => setState("hidden"));     // ✕ oculta todo
+  // ✕ oculta todo. Se avisa SIEMPRE cómo volver: el estado se persiste, así que
+  // sin este aviso quien no conozca el atajo se queda sin panel para siempre
+  // (recargar no lo devuelve). El toast es independiente del panel y del
+  // launcher, por eso se ve aunque ambos estén ocultos.
+  shadow.getElementById("btnClose").addEventListener("click", () => {
+    setState("hidden");
+    mostrarAviso("Oculto. Vuelve con " + TECLA_ATAJO + " o desde el icono de la extensión.", 6000);
+  });
   shadow.getElementById("btnRefresh").addEventListener("click", () => { firmaCargada = null; buscarAhora(); }); // 🔍 fuerza re-búsqueda
 
   // ----- Arrastre (burbuja y cabecera del panel) -----
@@ -622,6 +631,19 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
+
+      // El popup puede reabrir el overlay escribiendo overlayState. Es la única
+      // salida fiable del estado "hidden": el atajo de teclado puede estar
+      // ocupado por el navegador y el estado sobrevive a recargar la página.
+      if (changes.overlayState) {
+        const nuevo = changes.overlayState.newValue;
+        if ((nuevo === "bubble" || nuevo === "panel" || nuevo === "hidden") && nuevo !== state) {
+          state = nuevo;
+          aplicarEstadoUI();
+          if (state === "panel") { posicionarPanel(); evaluarChat(); }
+        }
+      }
+
       if (changes.tgEnabled) tgEnabled = !!changes.tgEnabled.newValue;
       if (changes.tgBotKh && typeof changes.tgBotKh.newValue === "string") tgBotKh = changes.tgBotKh.newValue.trim().replace(/^@/, "") || tgBotKh;
       if (changes.tgBotWolf && typeof changes.tgBotWolf.newValue === "string") tgBotWolf = changes.tgBotWolf.newValue.trim().replace(/^@/, "") || tgBotWolf;

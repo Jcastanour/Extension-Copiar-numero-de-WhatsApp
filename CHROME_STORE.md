@@ -1,25 +1,24 @@
-# Publicación en Chrome Web Store — v1.2.0
+# Publicación en Chrome Web Store — v1.3.0
 
 Documento de apoyo para subir la versión y completar el formulario de la tienda
 (justificaciones de permisos, divulgación de datos y política de privacidad).
 
-> ✅ **La v1.2.0 no cambia permisos ni datos.** Mismos 5 permisos, mismos 4 hosts,
-> misma declaración de uso de datos que la v1.1.0. **No hay que volver a certificar
-> nada.** Lo único que se actualiza en el formulario es la descripción de propósito
-> único, para que las funciones nuevas (leer el `@usuario` y normalizar un número
-> escrito a mano) queden cubiertas por lo declarado.
+> ✅ **La v1.3.0 tampoco cambia permisos ni datos.** Mismos 5 permisos y mismos 4
+> hosts desde la v1.1.0. **No hay que volver a certificar nada.** Solo se añade una
+> frase al propósito único y un punto a la política, por la utilidad nueva.
 >
-> Qué cambió por dentro: WhatsApp movió el número de teléfono a otra parte del panel
-> cuando el contacto tiene nombre de usuario, y la extensión dejó de encontrarlo.
-> Se corrigió la lectura y se añadieron rutas alternativas cuando el número no está
-> visible. Todo sigue ocurriendo en el navegador del usuario.
+> Qué trae esta versión: se puede volver a mostrar el panel flotante desde el icono
+> de la extensión (antes, al ocultarlo, la única salida era un atajo de teclado y el
+> estado sobrevivía a recargar, así que quedaba inaccesible); Auto-Telegram viene
+> activado de fábrica; y hay un decodificador de códigos de recarga que funciona
+> íntegramente en el navegador, sin enviar nada a ningún servidor.
 
 ---
 
 ## 1. Build
 
-- Archivo a subir: `dist/copiar-numero-whatsapp-1.2.0.zip` (manifest.json en la raíz).
-- Versión: `1.2.0`.
+- Archivo a subir: `dist/copiar-numero-whatsapp-1.3.0.zip` (manifest.json en la raíz).
+- Versión: `1.3.0`.
 
 ## 2. Propósito único (Single purpose)
 
@@ -101,7 +100,15 @@ mano. Ese número se normaliza en el propio navegador y se guarda de forma local
 transmite a ningún servidor salvo, si el usuario lo solicita, al backend del
 propietario para la misma consulta de cuentas descrita en el punto 1.
 
-**4. Integración con Telegram (opcional)**
+**4. Utilidades locales**
+La Extensión incluye una utilidad para decodificar los códigos de recarga que el
+proveedor del usuario entrega codificados en base64, y para normalizar números de
+teléfono escritos a mano. Ambas se ejecutan íntegramente en el navegador del
+usuario: esa información no se transmite a ningún servidor. El último código
+decodificado se conserva de forma temporal en `chrome.storage.local`, con
+caducidad automática, únicamente para que siga disponible al cambiar de pestaña.
+
+**5. Integración con Telegram (opcional)**
 Si el usuario habilita la función y pulsa "Pedir código", la Extensión abre o
 enfoca Telegram Web (web.telegram.org), escribe en el chat del bot del proveedor el
 correo de la cuenta seleccionada y lee la respuesta del bot para copiar el código de
@@ -109,13 +116,13 @@ verificación al portapapeles. Esta interacción ocurre dentro de la sesión de
 Telegram del propio usuario; la Extensión no almacena ni transmite esas
 conversaciones a terceros.
 
-**5. Transmisión y compartición de datos**
+**6. Transmisión y compartición de datos**
 El número de teléfono se transmite únicamente al backend del propietario para la
 función descrita. No vendemos ni transferimos los datos del usuario a terceros, ni
 los usamos para publicidad, marketing o evaluación de solvencia, ni para ningún fin
 ajeno a la funcionalidad principal declarada.
 
-**6. Permisos**
+**7. Permisos**
 La Extensión solicita los permisos mínimos necesarios para su función: `activeTab`,
 `scripting`, `clipboardWrite`, `storage` y `tabs`, además de acceso a los dominios
 web.whatsapp.com, web.telegram.org y el backend del propietario. No accede de forma
@@ -127,16 +134,16 @@ publicado en la ficha de la Chrome Web Store.
 
 ---
 
-## 6. Formulario de Privacidad — textos listos para pegar (v1.2.0)
+## 6. Formulario de Privacidad — textos listos para pegar (v1.3.0)
 
-> Frente a la v1.1.0 **solo** cambian la descripción de propósito único y las
-> justificaciones de `scripting` y `storage`. Las casillas de uso de datos y las
-> tres certificaciones se quedan **igual**. **Actualiza primero el Google Doc** de la
+> Frente a la v1.2.0 **solo** cambia la descripción de propósito único (una frase
+> al final, por el decodificador). Las justificaciones de permisos, las casillas de
+> uso de datos y las tres certificaciones se quedan **igual**. **Actualiza primero el Google Doc** de la
 > política con el texto de la sección 5 (el formulario certifica que coincide con la
 > política publicada).
 
 **Descripción de un solo propósito**
-> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Todas las acciones las inicia el usuario.
+> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Incluye además una utilidad local que decodifica los códigos de recarga que el proveedor entrega codificados, sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
 
 **Justificación de activeTab**
 > Se usa 'activeTab' para actuar sobre la pestaña actual cuando el usuario invoca la extensión (icono o atajo de teclado), leyendo la información necesaria en ese momento sin requerir acceso permanente a todas las pestañas, lo que protege la privacidad del navegador.

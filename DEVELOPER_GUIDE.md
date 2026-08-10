@@ -111,7 +111,35 @@ dos veces sin recargar.
 
 ---
 
-## ⌨️ 4. Atajos
+## 🪟 4. Estados del panel flotante (y por qué importa)
+
+`overlay.js` tiene tres estados, persistidos en `chrome.storage.local` bajo `overlayState`:
+
+| Estado | Qué se ve |
+|---|---|
+| `bubble` | Solo la burbuja ⚡ (por defecto) |
+| `panel` | El panel abierto; al entrar dispara el lookup del chat |
+| `hidden` | Nada |
+
+**Cuidado al tocar esto.** `hidden` se persiste, así que sobrevive a recargar la página. Hasta la
+v1.3.0 la única forma de salir de ese estado era el atajo `Ctrl/Cmd+Shift+Space`, que no está
+escrito en ninguna parte de la interfaz: si el navegador se quedaba con esa combinación, el panel
+quedaba **inaccesible para siempre** en esa instalación. Pasó de verdad, en Edge.
+
+Ahora hay tres salidas y conviene mantener las tres:
+
+1. El botón `◱` del popup escribe `overlayState: "bubble"`.
+2. `chrome.storage.onChanged` en `overlay.js` escucha `overlayState` y aplica el cambio **en vivo**.
+   Ojo: ahí se llama a `aplicarEstadoUI()` y no a `setState()`, para no volver a escribir en storage
+   y provocar un bucle de eventos.
+3. Al pulsar ✕ sale un aviso diciendo cómo volver. El toast es independiente del panel y del
+   launcher, por eso se ve aunque ambos estén ocultos.
+
+Regla general: **ninguna acción de un clic debe poder dejar la extensión sin una salida visible.**
+
+---
+
+## ⌨️ 5. Atajos
 
 Chrome solo permite **4 comandos con tecla sugerida** por extensión, y el manifest
 ya los tiene todos (`_execute_action` cuenta). Por eso:
@@ -124,7 +152,7 @@ ya los tiene todos (`_execute_action` cuenta). Por eso:
 
 ---
 
-## 🧪 5. Probar sin recargar nada
+## 🧪 6. Probar sin recargar nada
 
 En las DevTools de WhatsApp Web, cambia el contexto de la consola de `top` a
 **"Copiar número de WhatsApp"** y evalúa:

@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.2.0";
+  var VERSION = "1.3.0";
   if (window.__elixirUtils && window.__elixirUtils.VERSION === VERSION) return;
 
   // ---------------------------------------------------------------------------

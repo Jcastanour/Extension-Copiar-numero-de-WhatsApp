@@ -202,27 +202,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Cada script inyectado necesita numero-utils.js delante: los content_scripts
+// declarados en el manifest no se inyectan retroactivamente en pestañas que ya
+// estaban abiertas, y el guard versionado hace que repetirlo sea un no-op.
+const SCRIPTS_POR_COMANDO = {
+  "copiar-numero-auto": "copynumber.js",
+  "abrir-contactos-auto": "content.js",
+  "buscar-elixir-auto": "buscarelixir.js",
+  "copiar-usuario-auto": "copyusername.js",
+};
+
 chrome.commands.onCommand.addListener((command, tab) => {
   if (!tab || !tab.id) return;
+  const archivo = SCRIPTS_POR_COMANDO[command];
+  if (!archivo) return;
 
-  if (command === "copiar-numero-auto") {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["copynumber.js"],
-    });
-  }
-
-  if (command === "abrir-contactos-auto") {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["content.js"],
-    });
-  }
-
-  if (command === "buscar-elixir-auto") {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["buscarelixir.js"],
-    });
-  }
+  chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ["numero-utils.js", archivo],
+  });
 });

@@ -1,87 +1,21 @@
 // overlay.js — Panel flotante "en vivo" dentro de WhatsApp Web (Fase 2).
-// Detecta cambio de chat (MutationObserver + debounce), extrae el número del
-// header reusando la lógica de copynumber.js, pide el lookup al background
-// (que omite CORS) y pinta las cuentas. Aislado en un Shadow DOM.
+// Detecta cambio de chat (MutationObserver + debounce), obtiene la identidad del
+// chat con numero-utils.js, pide el lookup al background (que omite CORS) y
+// pinta las cuentas. Aislado en un Shadow DOM.
+//
+// También es el proveedor de UI del resto de la extensión: publica
+// window.__elixirUI para que los scripts inyectados por atajo, que no tienen
+// interfaz propia, pidan el número con un modal en vez de con un prompt().
 (function () {
+  // El módulo se comprueba antes de marcar el overlay como cargado: si aún no
+  // está, una inyección posterior debe poder reintentarlo.
+  const utils = window.__elixirUtils;
+  if (!utils) return;
+
   if (window.__elixirOverlayCargado) return; // evita doble inyección
   window.__elixirOverlayCargado = true;
 
-  // ----- Lógica de número (reusada de copynumber.js / buscarelixir.js) -----
-  function cleanText(text) {
-    if (!text) return "";
-    return text.replace(/[‪‬]/g, "").trim();
-  }
-  function isNumberMatch(text) {
-    const clean = cleanText(text);
-    if (clean.length < 8 || !clean.includes("+")) return false;
-    const digitsOnly = clean.replace(/[^\d+]/g, "");
-    return /^\+?\d{7,16}$/.test(digitsOnly);
-  }
-
-  // Extracción RÁPIDA (sin abrir paneles): solo lee el header del chat actual.
-  // Funciona cuando el título del chat es el propio número (contactos no guardados).
-  function numeroDesdeHeader() {
-    const header = document.querySelector("#main header");
-    if (!header) return null;
-    const spans = header.querySelectorAll('span[dir="auto"], span[title]');
-    for (const span of spans) {
-      const text = cleanText(span.textContent);
-      if (isNumberMatch(text)) return text;
-    }
-    return null;
-  }
-
-  // Extracción COMPLETA (abre el panel de contacto, busca, lo cierra). Se usa
-  // solo bajo demanda con el botón 🔍 para no interferir al cambiar de chat.
-  async function numeroCompleto() {
-    const desdeHeader = numeroDesdeHeader();
-    if (desdeHeader) return desdeHeader;
-
-    const header = document.querySelector("#main header");
-    if (!header) return null;
-
-    const clickable =
-      header.querySelector('span[dir="auto"]') ||
-      header.querySelector('div[role="button"]') ||
-      header;
-    clickable.click();
-    await new Promise((r) => setTimeout(r, 500));
-
-    const mainArea = document.querySelector("#main");
-    const leftPane = document.getElementById("pane-side");
-    const allSpans = document.querySelectorAll('span[dir="auto"], span.copyable-text');
-    let found = null;
-    for (const span of allSpans) {
-      if (mainArea && mainArea.contains(span)) continue;
-      if (leftPane && leftPane.contains(span)) continue;
-      if (span.getBoundingClientRect().left < window.innerWidth / 3) continue;
-      const text = cleanText(span.textContent);
-      if (isNumberMatch(text)) { found = text; break; }
-    }
-
-    // Cerrar panel lateral
-    const headers = document.querySelectorAll("header");
-    for (let i = headers.length - 1; i >= 0; i--) {
-      const h = headers[i];
-      if (h.closest("#main")) continue;
-      let closeSpan = h.querySelector('span[data-icon="x"]');
-      if (!closeSpan) {
-        const titles = h.querySelectorAll("title");
-        for (const t of titles) {
-          if (t.textContent === "ic-close" || t.textContent.includes("close") || t.textContent.includes("cerrar")) {
-            closeSpan = t.closest("span") || t.parentElement;
-            break;
-          }
-        }
-      }
-      if (closeSpan) {
-        const btn = closeSpan.closest('div[role="button"]') || closeSpan.closest("button") || closeSpan.parentElement;
-        if (btn) btn.click();
-        break;
-      }
-    }
-    return found;
-  }
+  const cleanText = utils.limpiarTexto;
 
   // ----- Helpers -----
   function escapeHtml(s) {
@@ -176,6 +110,33 @@
       .codigo small { color:#cbd5e1; font-weight:400; }
       .codigo .ccopy { background:rgba(255,255,255,.16); border:none; color:#fff; border-radius:6px; padding:3px 8px; font-size:11.5px; cursor:pointer; }
       .codigo .copiado-ok { color:#34d399; font-size:11px; font-weight:600; }
+
+      /* Modal para teclear el número cuando WhatsApp no lo expone */
+      .modal-fondo {
+        position:fixed; inset:0; background:rgba(15,12,35,.45);
+        display:flex; align-items:center; justify-content:center;
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      }
+      .modal {
+        width:320px; max-width:calc(100vw - 32px); background:#fff; color:#1e1b2e;
+        border-radius:14px; overflow:hidden; box-shadow:0 14px 40px rgba(20,16,41,.35);
+      }
+      .modal .hdr { cursor:default; }
+      .modal-body { padding:13px; }
+      .modal-body p { margin:0 0 10px; font-size:12.5px; color:#4b5563; line-height:1.45; }
+      .modal-body p b { color:#7c3aed; }
+      .modal input {
+        width:100%; padding:10px 11px; font-size:14px; border:1px solid #ddd4ff;
+        border-radius:9px; color:#1e1b2e; background:#fff;
+      }
+      .modal input:focus { outline:none; border-color:#8b5cf6; box-shadow:0 0 0 3px rgba(139,92,246,.18); }
+      .modal .previo { margin-top:8px; font-size:12.5px; color:#137a45; font-weight:600; min-height:17px; }
+      .modal .previo.mal { color:#b42318; font-weight:500; }
+      .modal-acciones { display:flex; gap:7px; margin-top:11px; }
+      .modal-acciones button { flex:1; border-radius:9px; font-weight:600; font-size:12.5px; padding:9px; cursor:pointer; }
+      .modal .ok { background:linear-gradient(135deg,#635bff,#8b5cf6); color:#fff; border:none; }
+      .modal .ok:disabled { opacity:.5; cursor:default; }
+      .modal .cancelar { background:#fff; color:#6b7280; border:1px solid #e7e7ef; }
     </style>
     <button class="launcher" id="launcher" title="Mostrar cuentas Elixir" hidden>⚡</button>
     <div class="panel" id="panel">
@@ -191,13 +152,28 @@
         <div class="msg">Abre un chat para ver las cuentas.</div>
       </div>
     </div>
-    <div class="toast" id="toast" hidden></div>`;
+    <div class="toast" id="toast" hidden></div>
+    <div class="modal-fondo" id="modalFondo" hidden>
+      <div class="modal">
+        <div class="hdr"><span class="ttl">⚡ Falta el número</span></div>
+        <div class="modal-body">
+          <p id="modalTexto"></p>
+          <input type="text" id="modalInput" placeholder="302 422 0918" autocomplete="off" spellcheck="false" />
+          <div class="previo" id="modalPrevio"></div>
+          <div class="modal-acciones">
+            <button class="cancelar" id="modalCancelar">Cancelar</button>
+            <button class="ok" id="modalOk" disabled>Usar número</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
   document.documentElement.appendChild(host);
 
   const elPanel = shadow.getElementById("panel");
   const elLauncher = shadow.getElementById("launcher");
   const elBody = shadow.getElementById("body");
   const elToast = shadow.getElementById("toast");
+  const elModal = shadow.getElementById("modalFondo");
 
   // ----- Posición (burbuja, panel y toast son position:fixed) -----
   const BW = 46;        // tamaño de la burbuja
@@ -284,6 +260,79 @@
     toastTimer = setTimeout(() => { elToast.hidden = true; }, 3000);
   }
 
+  // ----- Modal para teclear el número que WhatsApp no expone -----
+  // Vive dentro de este mismo shadow root a propósito: la guarda de
+  // "clic fuera → minimizar" comprueba composedPath().includes(host), así que
+  // montarlo en otro host haría que el modal se cerrara solo al escribir en él.
+  let modalResolver = null;
+
+  function cerrarModal(valor) {
+    elModal.hidden = true;
+    const r = modalResolver;
+    modalResolver = null;
+    if (r) r(valor);
+  }
+
+  function pedirNumeroEnModal(ctx) {
+    const c = ctx || {};
+    const input = shadow.getElementById("modalInput");
+    const previo = shadow.getElementById("modalPrevio");
+    const ok = shadow.getElementById("modalOk");
+    const texto = shadow.getElementById("modalTexto");
+
+    const quien = c.username ? ` de <b>${escapeHtml(c.username)}</b>` : "";
+    texto.innerHTML = c.error
+      ? escapeHtml(c.error)
+      : `WhatsApp no muestra el número${quien}${c.historialVacio ? " y el chat no tiene historial cargado" : ""}. Escríbelo y lo recuerdo para este chat.`;
+
+    input.value = "";
+    previo.textContent = "";
+    ok.disabled = true;
+    elModal.hidden = false;
+    setTimeout(() => input.focus(), 0);
+
+    return new Promise((resolve) => { modalResolver = resolve; });
+  }
+
+  (function cablearModal() {
+    const input = shadow.getElementById("modalInput");
+    const previo = shadow.getElementById("modalPrevio");
+    const ok = shadow.getElementById("modalOk");
+
+    // WhatsApp tiene handlers globales de teclado que roban el foco hacia el
+    // compositor. Sin parar la propagación en captura, no se puede escribir.
+    ["keydown", "keyup", "keypress"].forEach((ev) => {
+      input.addEventListener(ev, (e) => { e.stopPropagation(); }, true);
+    });
+
+    input.addEventListener("input", () => {
+      const n = utils.normalizarNumero(input.value, { asumirPais: true });
+      if (n.ok) {
+        previo.textContent = "Se usará: " + n.display;
+        previo.classList.remove("mal");
+        ok.disabled = false;
+      } else {
+        previo.textContent = input.value.trim() ? "Escribe 302 422 0918 o +1 305 555 0123" : "";
+        previo.classList.add("mal");
+        ok.disabled = true;
+      }
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !ok.disabled) cerrarModal(input.value);
+      if (e.key === "Escape") cerrarModal(null);
+    });
+    ok.addEventListener("click", () => cerrarModal(input.value));
+    shadow.getElementById("modalCancelar").addEventListener("click", () => cerrarModal(null));
+  })();
+
+  // Contrato con numero-utils.js: los scripts inyectados por atajo no tienen UI
+  // propia, así que heredan este modal y este toast en vez de un alert().
+  window.__elixirUI = {
+    pedirNumero: pedirNumeroEnModal,
+    aviso: (texto) => mostrarAviso(texto),
+  };
+
   // Búsqueda completa: abre el panel de contacto si hace falta, encuentra el
   // número y consulta las cuentas. Sin número → vuelve a burbuja + aviso.
   // `buscando` se mantiene hasta que lookup() responde (lo libera su callback).
@@ -291,10 +340,19 @@
     if (buscando) return;
     buscando = true;
     setMsg("Buscando…");
-    const numero = await numeroCompleto();
+    // permitirManual: es una acción explícita del usuario (botón 🔍), así que
+    // aquí sí tiene sentido preguntarle el número si no aparece por ningún lado.
+    const id = await utils.obtenerIdentidad({
+      permitirPanel: true, permitirManual: true, motivo: "buscar cuentas",
+    });
     if (state !== "panel") { buscando = false; return; } // se minimizó/cerró mientras buscaba
-    if (!numero) { buscando = false; setState("bubble"); mostrarAviso("Sin número en este chat"); return; }
-    lookup(numero);
+    if (id.fuente === "grupo") {
+      buscando = false; setState("bubble"); mostrarAviso("Es un chat de grupo"); return;
+    }
+    if (!id.numero) {
+      buscando = false; setState("bubble"); mostrarAviso("Sin número en este chat"); return;
+    }
+    lookup(id.numero);
   }
 
   // ----- Render -----
@@ -504,9 +562,23 @@
   document.addEventListener("keydown", (e) => {
     if (!e.shiftKey) return;
     if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.code !== "Space") return;
-    e.preventDefault();
-    setState(state === "panel" ? "bubble" : "panel"); // toggle (también saca de "hidden")
+    if (!elModal.hidden) return; // escribiendo el número: no robar las teclas
+
+    if (e.code === "Space") {
+      e.preventDefault();
+      setState(state === "panel" ? "bubble" : "panel"); // toggle (también saca de "hidden")
+      return;
+    }
+
+    // Ctrl/Cmd+Shift+U: copiar el @usuario. Va aquí y no en chrome.commands
+    // porque el manifest ya agotó los 4 atajos con tecla sugerida que permite Chrome.
+    if (e.code === "KeyU") {
+      e.preventDefault();
+      utils.obtenerUsuario({ permitirPanel: true }).then((r) => {
+        if (!r.username) { mostrarAviso("Este contacto no tiene usuario"); return; }
+        utils.copiar(r.username).then(() => mostrarAviso("Usuario copiado: " + r.username));
+      });
+    }
   }, true);
 
   // Posición por defecto: esquina inferior-derecha, arriba del compositor.

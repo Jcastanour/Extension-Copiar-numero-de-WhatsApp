@@ -1,93 +1,24 @@
 // popup.js
 
 // ---------------------------------------------------------------------------
-// Función que se INYECTA en la pestaña de WhatsApp Web. Reutiliza la lógica
-// probada de copynumber.js / buscarelixir.js, pero es async y RETORNA el número
-// (string) o null, en vez de copiar/abrir. chrome.scripting.executeScript
-// resuelve el valor retornado por una función async en results[0].result.
+// Identidad del chat abierto en la pestaña de WhatsApp Web.
+// La lógica vive en numero-utils.js. Se inyecta primero el módulo y luego una
+// función que solo lo invoca: una función pasada por `func:` se serializa con
+// toString(), así que no puede capturar nada del popup, pero en ejecución su
+// `window` sí es el del isolated world donde quedó instalado el módulo.
 // ---------------------------------------------------------------------------
-async function extraerNumeroParaLookup() {
-  function cleanText(text) {
-    if (!text) return "";
-    return text.replace(/[‪‬]/g, "").trim();
-  }
+function __snippetIdentidad() {
+  const u = window.__elixirUtils;
+  if (!u) return { error: "sin-utils" };
+  // Sin fallback manual: el popup se cierra al perder el foco y la promesa
+  // moriría con él. Si no hay número, se pide con el input de #resultados.
+  return u.obtenerIdentidad({ permitirPanel: true, permitirManual: false });
+}
 
-  function isNumberMatch(text) {
-    const clean = cleanText(text);
-    if (clean.length < 8 || !clean.includes("+")) return false;
-    const digitsOnly = clean.replace(/[^\d+]/g, "");
-    return /^\+?\d{7,16}$/.test(digitsOnly);
-  }
-
-  const header = document.querySelector("#main header");
-  if (!header) return null; // no hay chat abierto
-
-  // 1. CHEQUEAR ENCABEZADO
-  const headerSpans = header.querySelectorAll('span[dir="auto"], span[title]');
-  for (const span of headerSpans) {
-    const text = cleanText(span.textContent);
-    if (isNumberMatch(text)) return text;
-  }
-
-  // 2. ABRIR PANEL LATERAL
-  const clickableArea =
-    header.querySelector('span[dir="auto"]') ||
-    header.querySelector('div[role="button"]') ||
-    header;
-  clickableArea.click();
-
-  // 3. ESPERAR Y BUSCAR EN LATERAL DERECHO
-  await new Promise((r) => setTimeout(r, 500));
-
-  const mainArea = document.querySelector("#main");
-  const leftPane = document.getElementById("pane-side") || document.querySelector("#pane-side");
-  const allSpans = document.querySelectorAll('span[dir="auto"], span.copyable-text');
-
-  let foundNumber = null;
-  for (const span of allSpans) {
-    if (mainArea && mainArea.contains(span)) continue;
-    if (leftPane && leftPane.contains(span)) continue;
-    if (span.getBoundingClientRect().left < window.innerWidth / 3) continue;
-
-    const text = cleanText(span.textContent);
-    if (isNumberMatch(text)) {
-      foundNumber = text;
-      break;
-    }
-  }
-
-  // 4. CERRAR EL PANEL LATERAL
-  const headers = document.querySelectorAll("header");
-  for (let i = headers.length - 1; i >= 0; i--) {
-    const h = headers[i];
-    if (h.closest("#main")) continue;
-
-    let closeSpan = h.querySelector('span[data-icon="x"]');
-    if (!closeSpan) {
-      const titles = h.querySelectorAll("title");
-      for (const t of titles) {
-        if (
-          t.textContent === "ic-close" ||
-          t.textContent.includes("close") ||
-          t.textContent.includes("cerrar")
-        ) {
-          closeSpan = t.closest("span") || t.parentElement;
-          break;
-        }
-      }
-    }
-
-    if (closeSpan) {
-      const btn =
-        closeSpan.closest('div[role="button"]') ||
-        closeSpan.closest("button") ||
-        closeSpan.parentElement;
-      if (btn) btn.click();
-      break;
-    }
-  }
-
-  return foundNumber;
+async function identidadDeLaPestana(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["numero-utils.js"] });
+  const r = await chrome.scripting.executeScript({ target: { tabId }, func: __snippetIdentidad });
+  return (r && r[0] && r[0].result) || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +251,58 @@ async function restaurarUltimoResultadoTG() {
   });
 }
 
+// Cuando no se pudo leer el número (contacto que solo tiene @usuario), se pide
+// aquí dentro: el popup no pierde el foco mientras se escribe en él.
+function pedirNumeroEnPopup(id) {
+  const quien = id && id.username ? ` de <b>${escapeHtml(id.username)}</b>` : "";
+  setResultado(`
+    <div class="msg">No se encontró el número${quien}. Escríbelo y lo busco:</div>
+    <div class="manual-row">
+      <input type="text" id="numManual" placeholder="302 422 0918" autocomplete="off" />
+      <button id="numManualOk" class="btn btn-primary">Buscar</button>
+    </div>
+    <div class="hint" id="numManualHint">Se guarda para este chat y no te lo vuelvo a preguntar.</div>
+  `);
+
+  const input = document.getElementById("numManual");
+  const hint = document.getElementById("numManualHint");
+  input.focus();
+
+  const enviar = async () => {
+    const n = normalizarEnPopup(input.value);
+    if (!n.ok) {
+      hint.textContent = "Formato no válido. Usa 302 422 0918 o +1 305 555 0123.";
+      hint.style.color = "var(--err-fg, #b91c1c)";
+      return;
+    }
+    if (id && id.clave) await recordarNumeroManual(id.clave, n.display);
+    lookupDeNumero(n.display);
+  };
+
+  document.getElementById("numManualOk").addEventListener("click", enviar);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") enviar(); });
+}
+
+// numero-utils.js también se carga en el documento del popup (popup.html), así
+// que la normalización es exactamente la misma que usa la página.
+function normalizarEnPopup(raw) {
+  const u = window.__elixirUtils;
+  if (!u) return { ok: false };
+  return u.normalizarNumero(raw, { asumirPais: true });
+}
+
+async function recordarNumeroManual(clave, numero) {
+  const tab = await getActiveTab();
+  if (!tab || !tab.id) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (c, n) => window.__elixirUtils && window.__elixirUtils.guardarManual(c, n),
+      args: [clave, numero],
+    });
+  } catch (e) { /* si no se pudo guardar, se volverá a preguntar: no es crítico */ }
+}
+
 async function buscarCuentas() {
   setMensaje("Extrayendo número…");
 
@@ -329,23 +312,35 @@ async function buscarCuentas() {
     return;
   }
 
-  let numero = null;
+  let id = null;
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extraerNumeroParaLookup,
-    });
-    numero = results && results[0] ? results[0].result : null;
+    id = await identidadDeLaPestana(tab.id);
   } catch (e) {
     setMensaje("No se pudo leer la página. Abre un chat de WhatsApp Web primero.", true);
     return;
   }
 
-  if (!numero) {
-    setMensaje("No se encontró el número. Abre un chat de WhatsApp Web primero.", true);
+  if (!id || id.error === "sin-utils") {
+    setMensaje("Recarga la pestaña de WhatsApp Web y vuelve a intentar.", true);
+    return;
+  }
+  if (id.fuente === "sin-chat") {
+    setMensaje("Abre un chat de WhatsApp Web primero.", true);
+    return;
+  }
+  if (id.fuente === "grupo") {
+    setMensaje("Este es un chat de grupo: no tiene un número único.", true);
+    return;
+  }
+  if (!id.numero) {
+    pedirNumeroEnPopup(id);
     return;
   }
 
+  lookupDeNumero(id.numero);
+}
+
+async function lookupDeNumero(numero) {
   const { baseUrl, apiKey } = await getConfig();
   if (!apiKey) {
     setMensaje("API key inválida o no configurada.", true);
@@ -432,29 +427,23 @@ async function guardarConfig() {
 document.addEventListener("DOMContentLoaded", function () {
   cargarConfigEnInputs();
 
-  document.getElementById("abrirContacts").addEventListener("click", function () {
+  // Todas las acciones inyectan numero-utils.js delante: es donde vive la lógica
+  // y el guard versionado hace que repetirlo no cueste nada.
+  function ejecutarEnPestana(archivo) {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, files: ["content.js"] });
+      if (!tabs || !tabs[0]) return;
+      chrome.scripting.executeScript({
+        target: { tabId: tabs[0].id },
+        files: ["numero-utils.js", archivo],
+      });
     });
-  });
+  }
 
-  document.getElementById("copyName").addEventListener("click", function () {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, files: ["copyname.js"] });
-    });
-  });
-
-  document.getElementById("copyNumber").addEventListener("click", function () {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, files: ["copynumber.js"] });
-    });
-  });
-
-  document.getElementById("buscarElixir").addEventListener("click", function () {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-      chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, files: ["buscarelixir.js"] });
-    });
-  });
+  document.getElementById("abrirContacts").addEventListener("click", () => ejecutarEnPestana("content.js"));
+  document.getElementById("copyName").addEventListener("click", () => ejecutarEnPestana("copyname.js"));
+  document.getElementById("copyNumber").addEventListener("click", () => ejecutarEnPestana("copynumber.js"));
+  document.getElementById("copyUsername").addEventListener("click", () => ejecutarEnPestana("copyusername.js"));
+  document.getElementById("buscarElixir").addEventListener("click", () => ejecutarEnPestana("buscarelixir.js"));
 
   document.getElementById("buscarCuentas").addEventListener("click", buscarCuentas);
   document.getElementById("cfgGuardar").addEventListener("click", guardarConfig);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Copiar número de WhatsApp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Una extensión que copia automáticamente el número de teléfono de WhatsApp Web.",
   "permissions": ["activeTab", "scripting", "clipboardWrite", "storage", "tabs"],
   "action": {
@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["*://web.whatsapp.com/*"],
-      "js": ["overlay.js"],
+      "js": ["numero-utils.js", "overlay.js"],
       "run_at": "document_idle"
     },
     {
@@ -60,6 +60,9 @@
         "mac": "Command+Shift+Z"
       },
       "description": "Buscar número en Elixir Cuentas"
+    },
+    "copiar-usuario-auto": {
+      "description": "Copiar nombre de usuario (@) del chat — asignar tecla en chrome://extensions/shortcuts"
     }
   }
 }

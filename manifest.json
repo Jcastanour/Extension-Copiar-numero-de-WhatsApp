@@ -34,7 +34,7 @@
     "https://elixircuentas-test.fly.dev/*",
     "https://elixircuentas.com/*",
     "https://codigos.elixircuentas.com/*",
-    "http://localhost:8000/*"
+    "http://localhost/*"
   ],
   "commands": {
     "_execute_action": {

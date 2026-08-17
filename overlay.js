@@ -607,6 +607,11 @@
   // ahí el operador está pidiendo explícitamente que se busque.
   //
   // `buscando` se mantiene hasta que lookup() responde (lo libera su callback).
+  // Chats a los que ya se les abrió el panel de contacto sin encontrar nada. Sin
+  // esto, un chat que de verdad no expone el teléfono abriría el panel cada vez
+  // que se entra en él.
+  const sinNumeroConocido = new Set();
+
   async function buscarAhora(opts) {
     const auto = !!(opts && opts.auto);
     if (buscando) return;
@@ -614,12 +619,27 @@
     const firmaAlEmpezar = firmaActual;
     ponerDatos({ estado: "buscando" });
 
-    const id = await utils.obtenerIdentidad({
+    // Primera pasada: solo lectura, sin tocar la interfaz de WhatsApp.
+    let id = await utils.obtenerIdentidad({
       rapido: auto,
       permitirPanel: !auto,
       permitirManual: !auto,
       motivo: "buscar cuentas",
     });
+
+    // Muchos contactos ya no muestran el teléfono en ningún sitio salvo en "Info.
+    // del contacto" — es justo lo que WhatsApp está cambiando. Renunciar ahí
+    // dejaba el chip en "Sin número" en chats donde Ctrl/Cmd+Shift+C sí lo saca,
+    // que es lo peor de los dos mundos. Así que se abre el panel, pero UNA sola
+    // vez por chat: el número se guarda y las visitas siguientes salen de la
+    // caché sin tocar nada.
+    if (auto && !id.numero && id.fuente !== "grupo" && id.clave && !sinNumeroConocido.has(id.clave)) {
+      id = await utils.obtenerIdentidad({
+        rapido: false, permitirPanel: true, permitirManual: false,
+      });
+      if (id.numero) await utils.guardarManual(id.clave, id.numero);
+      else sinNumeroConocido.add(id.clave);
+    }
 
     // Cambió de chat mientras se resolvía la identidad: lo que venga ya no es de
     // este chat. Se descarta sin pintar nada — el cambio ya programó su propia
@@ -1209,6 +1229,9 @@
   // una acción explícita, puede abrir el panel de contacto y pedir el número.
   shadow.getElementById("btnRefresh").addEventListener("click", () => {
     if (firmaActual) cacheChats.delete(firmaActual);
+    // También se olvida el "aquí no hay número": si se pulsa refrescar es
+    // justamente para que vuelva a intentarlo todo.
+    sinNumeroConocido.clear();
     firmaCargada = null;
     buscarAhora({ auto: false });
   });

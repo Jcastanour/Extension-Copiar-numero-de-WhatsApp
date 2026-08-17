@@ -107,16 +107,21 @@
       .ficha .cab .anti { color:#9ca3af; font-size:11px; white-space:nowrap; }
       .ficha .tel { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:#6b7280; margin-top:1px; }
       .ficha .sep { border-top:1px solid #eceaf5; margin:8px 0; }
-      .ficha .dfila { display:flex; align-items:center; gap:8px; }
+      /* Mismo bloque ámbar que el panel y que la web: los D son siempre "lo que
+         va en el nombre del contacto", y deben reconocerse al instante. */
+      .ficha .dfila {
+        display:flex; align-items:center; gap:8px;
+        border:1px solid #fcd34d; background:#fffbeb; border-radius:9px; padding:7px 9px;
+      }
       .ficha .dfila .ds {
         flex:1; font-family:ui-monospace,Menlo,monospace; font-weight:700;
-        font-size:13.5px; color:#5b21b6; word-break:break-word;
+        font-size:16px; color:#451a03; letter-spacing:.5px; word-break:break-word;
       }
       .ficha .cop {
-        background:#f3f0ff; color:#6d28d9; border:1px solid #ddd4ff; border-radius:7px;
+        background:#fff; color:#78350f; border:1px solid #b45309; border-radius:7px;
         font-size:11px; font-weight:600; padding:3px 8px; cursor:pointer; white-space:nowrap;
       }
-      .ficha .cop:hover { background:#ebe5ff; }
+      .ficha .cop:hover { background:#fef3c7; }
       .ficha .resumen { color:#4b5563; margin-top:6px; }
       .ficha .flag { border-radius:8px; padding:6px 8px; margin-top:6px; font-size:11.5px; }
       .ficha .flag.roja { background:#fdeaea; color:#991b1b; }
@@ -163,6 +168,31 @@
       }
       .mini:hover { background:rgba(255,255,255,.32); }
       .body { padding:10px; overflow-y:auto; }
+
+      /* Quién es, arriba del todo. El nombre manda: es lo que uno busca al
+         asomarse al panel. */
+      .quien { margin:0 2px 9px; }
+      .quien-nom { font-size:16px; font-weight:800; line-height:1.2; }
+      .quien-sub { margin-top:2px; font-size:11.5px; color:#6b7280; font-family:ui-monospace,Menlo,monospace; }
+
+      /* La secuencia D, con el mismo lenguaje visual que la ficha de la web
+         (ClientHistoryPage → ContactDaysPanel). Es lo que hay que dejar escrito
+         en el nombre del contacto, así que tiene que leerse de un vistazo y no
+         como una nota al pie. */
+      .dcard { border:1px solid #fcd34d; background:#fffbeb; border-radius:11px; padding:10px; margin-bottom:10px; }
+      .dcard-tit { font-size:11.5px; font-weight:600; color:#78350f; }
+      .dcard-ds {
+        margin-top:3px; font-family:ui-monospace,Menlo,monospace;
+        font-size:19px; font-weight:700; color:#451a03; letter-spacing:.5px; word-break:break-word;
+      }
+      .dcard-ds.vacio { font-size:14px; font-weight:600; color:#92400e; }
+      .dcard-acc { display:flex; gap:6px; margin-top:8px; }
+      .dbtn {
+        background:#fff; border:1px solid #b45309; color:#78350f; border-radius:8px;
+        font-size:11.5px; font-weight:600; padding:4px 10px; cursor:pointer;
+      }
+      .dbtn:hover { background:#fef3c7; }
+      .dbtn.done { background:#e7f7ee; color:#137a45; border-color:#bfe9cf; }
 
       .msg { color:#6b7280; text-align:center; padding:12px; font-size:12.5px; }
       .msg.error { color:#b42318; }
@@ -816,7 +846,7 @@
         e.stopPropagation();
         await copiar(d.dStr);
         cop.textContent = "✓";
-        setTimeout(() => { cop.textContent = "Copiar D"; }, 1200);
+        setTimeout(() => { cop.textContent = "Copiar"; }, 1200);
       });
     }
   }
@@ -874,7 +904,7 @@
       `<div class="tel">${escapeHtml(d.termino)}</div>` +
       `<div class="sep"></div>` +
       (d.dStr
-        ? `<div class="dfila"><span class="ds">${escapeHtml(d.dStr)}</span><button class="cop">Copiar D</button></div>`
+        ? `<div class="dfila"><span class="ds">${escapeHtml(d.dStr)}</span><button class="cop">Copiar</button></div>`
         : "") +
       (resumen ? `<div class="resumen">${escapeHtml(resumen)}</div>` : "") +
       avisos + cuerpo
@@ -949,6 +979,53 @@
     return `<div class="cerradas"><b>Últimas cerradas</b><ul>${filas}</ul></div>`;
   }
 
+  // Cabecera del panel: quién es y qué D debe llevar su contacto.
+  function cabeceraHtml(d, nCuentas) {
+    const sub = [
+      escapeHtml(d.termino),
+      typeof nCuentas === "number" ? nCuentas + (nCuentas === 1 ? " cuenta" : " cuentas") : "",
+    ].filter(Boolean).join(" · ");
+    return (
+      `<div class="quien">` +
+        (d.nombre ? `<div class="quien-nom">${escapeHtml(d.nombre)}</div>` : "") +
+        `<div class="quien-sub">${sub}</div>` +
+      `</div>` +
+      `<div class="dcard">` +
+        `<div class="dcard-tit">Google Contacts — debe tener</div>` +
+        (d.dStr
+          ? `<div class="dcard-ds">${escapeHtml(d.dStr)}</div>` +
+            `<div class="dcard-acc">` +
+              `<button class="dbtn" id="btnCopiarD">Copiar</button>` +
+              `<button class="dbtn" id="btnContacts">Abrir contacts</button>` +
+            `</div>`
+          : `<div class="dcard-ds vacio">(ningún D)</div>`) +
+      `</div>`
+    );
+  }
+
+  // Cablea los botones de la tarjeta D. Va aparte porque la cabecera se pinta
+  // desde dos sitios (con cuentas y sin ellas).
+  function cablearCabecera(d) {
+    const bCopiar = shadow.getElementById("btnCopiarD");
+    if (bCopiar) {
+      bCopiar.addEventListener("click", async () => {
+        await copiar(d.dStr);
+        bCopiar.textContent = "¡Copiado!"; bCopiar.classList.add("done");
+        setTimeout(() => { bCopiar.textContent = "Copiar"; bCopiar.classList.remove("done"); }, 1400);
+      });
+    }
+    const bContacts = shadow.getElementById("btnContacts");
+    if (bContacts) {
+      bContacts.title = "Abrir Google Contacts (copia " + d.dStr + ")";
+      bContacts.addEventListener("click", async () => {
+        // Se copia la secuencia antes de abrir, que es lo que hay que pegar en el
+        // nombre. Mismo gesto que el botón de la web.
+        await copiar(d.dStr);
+        window.open("https://contacts.google.com/search/" + encodeURIComponent(d.termino), "_blank");
+      });
+    }
+  }
+
   function renderCuentas(d) {
     const accounts = d.accounts;
 
@@ -956,14 +1033,14 @@
     // número desconocido y el panel se cerraba con un "sin cuentas"; en realidad
     // es una instrucción de trabajo, y de las importantes.
     if (!accounts.length) {
-      const quien = d.nombre ? `<b>${escapeHtml(d.nombre)}</b>` : "Este número";
+      if (!d.found) { setMsg("Sin cuentas para este número."); return; }
       setBody(
-        d.found
-          ? `<div class="aviso limpieza">🧹 ${quien} no tiene cuentas activas.<br>` +
-            `<b>Limpieza total:</b> quitar la etiqueta <i>pagos</i> y toda D del nombre del contacto.</div>` +
-            cerradasHtml(d)
-          : `<div class="msg">Sin cuentas para este número.</div>`
+        cabeceraHtml(d, 0) +
+        `<div class="aviso limpieza">🧹 <b>Limpieza total:</b> quitar la etiqueta ` +
+        `<i>pagos</i> y toda D del nombre del contacto.</div>` +
+        cerradasHtml(d)
       );
+      cablearCabecera(d);
       return;
     }
 
@@ -995,12 +1072,8 @@
           <div class="codigo-slot"></div>
         </div>`;
     }).join("");
-    const titulo = d.nombre ? `${escapeHtml(d.nombre)} · ` : "";
-    setBody(
-      `<div class="num">📱 ${titulo}<b>${escapeHtml(d.termino)}</b> · ${ord.length} cuenta(s)</div>` +
-      (d.dStr ? `<div class="num">🗓️ <b>${escapeHtml(d.dStr)}</b></div>` : "") +
-      cards
-    );
+    setBody(cabeceraHtml(d, ord.length) + cards);
+    cablearCabecera(d);
 
     shadow.querySelectorAll(".copy").forEach((btn) => {
       btn.addEventListener("click", async () => {

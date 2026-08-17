@@ -39,7 +39,7 @@ function hasChromeStorage() {
 function getConfig() {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.get(["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "overlayEnabled", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
+      chrome.storage.local.get(["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "overlayEnabled", "overlayForma", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
     } else {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
@@ -47,6 +47,7 @@ function getConfig() {
         codigosUrl: localStorage.getItem("codigosUrl") || "",
         codigosApiKey: localStorage.getItem("codigosApiKey") || "",
         overlayEnabled: localStorage.getItem("overlayEnabled") !== "false", // encendido salvo que se apague
+        overlayForma: localStorage.getItem("overlayForma") || "burbuja",
         tgEnabled: localStorage.getItem("tgEnabled") !== "false", // encendido salvo que se apague
         tgBotKh: localStorage.getItem("tgBotKh") || "",
         tgBotWolf: localStorage.getItem("tgBotWolf") || "",
@@ -540,8 +541,8 @@ async function cargarConfigEnInputs() {
   if (cfg.apiKey) document.getElementById("cfgApiKey").value = cfg.apiKey;
   document.getElementById("cfgCodigosUrl").value = cfg.codigosUrl || "https://codigos.elixircuentas.com";
   if (cfg.codigosApiKey) document.getElementById("cfgCodigosApiKey").value = cfg.codigosApiKey;
-  // El flotante viene encendido salvo que se haya apagado a propósito.
-  document.getElementById("cfgOverlayEnabled").checked = cfg.overlayEnabled !== false;
+  document.getElementById("cfgOverlayForma").value =
+    cfg.overlayForma === "barra" ? "barra" : "burbuja";
   // !!cfg.tgEnabled dejaría en false a quien nunca lo configuró: solo apagamos
   // si hay un false guardado a propósito.
   tgEnabled = cfg.tgEnabled !== false;
@@ -557,14 +558,14 @@ async function guardarConfig() {
   const apiKey = document.getElementById("cfgApiKey").value.trim();
   const codigosUrl = document.getElementById("cfgCodigosUrl").value.trim().replace(/\/+$/, "");
   const codigosApiKey = document.getElementById("cfgCodigosApiKey").value.trim();
-  const overlayEnabledNuevo = document.getElementById("cfgOverlayEnabled").checked;
+  const overlayFormaNueva = document.getElementById("cfgOverlayForma").value;
   const tgEnabledNuevo = document.getElementById("cfgTgEnabled").checked;
   const tgBotKhNuevo = document.getElementById("cfgTgBotKh").value.trim().replace(/^@/, "");
   const tgBotWolfNuevo = document.getElementById("cfgTgBotWolf").value.trim().replace(/^@/, "");
   tgEnabled = tgEnabledNuevo;
   if (tgBotKhNuevo) tgBotKh = tgBotKhNuevo;
   if (tgBotWolfNuevo) tgBotWolf = tgBotWolfNuevo;
-  await setConfig({ baseUrl, apiKey, codigosUrl, codigosApiKey, overlayEnabled: overlayEnabledNuevo, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
+  await setConfig({ baseUrl, apiKey, codigosUrl, codigosApiKey, overlayForma: overlayFormaNueva, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {
@@ -605,29 +606,38 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Reabre el panel flotante. El overlay escucha overlayState en
   // chrome.storage.onChanged, así que reaparece sin recargar WhatsApp.
-  document.getElementById("btnMostrarPanel").addEventListener("click", async function () {
+  // Interruptor del flotante. Un solo control, y con estado visible: antes había
+  // un botón aquí y un check en Ajustes gobernando lo mismo, y acababan
+  // contradiciéndose.
+  async function pintarBotonFlotante() {
+    const cfg = await getConfig();
+    const on = cfg.overlayEnabled !== false;
+    const pastilla = document.getElementById("btnFlotanteEstado");
+    pastilla.textContent = on ? "Encendido" : "Apagado";
+    pastilla.className = "pastilla " + (on ? "on" : "off");
+    document.getElementById("btnFlotanteTxt").textContent =
+      on ? "⚡ Panel flotante" : "⚡ Panel flotante";
+    document.getElementById("btnFlotante").title = on
+      ? "Quitarlo de WhatsApp Web. Ctrl/Cmd+Shift+C seguirá copiando el número."
+      : "Volver a mostrarlo en WhatsApp Web.";
+  }
+
+  document.getElementById("btnFlotante").addEventListener("click", async function () {
     try {
-      const { overlayState, overlayEnabled } = await chrome.storage.local.get([
-        "overlayState", "overlayEnabled",
-      ]);
-      if (overlayEnabled !== false) {
-        // Ya está encendido. No se toca overlayState: escribir "bubble" estando
-        // en "panel" lo minimizaría, que es lo contrario de lo que se pidió.
-        setMensaje(
-          overlayState === "panel"
-            ? "El panel ya está abierto en WhatsApp Web."
-            : "El panel ya está visible en WhatsApp Web."
-        );
-        return;
-      }
-      // Rescate: alguien lo apagó en Ajustes y este botón es lo primero que se
-      // prueba. El overlay escucha overlayEnabled, así que vuelve sin recargar.
-      await chrome.storage.local.set({ overlayEnabled: true, overlayState: "bubble" });
-      setMensaje("Panel activado. Míralo en la pestaña de WhatsApp Web.");
+      const cfg = await getConfig();
+      const nuevo = cfg.overlayEnabled === false;   // apagado → encender
+      // overlayState solo se toca al encender, y siempre a "bubble": escribirlo
+      // estando en "panel" lo minimizaría sin que nadie lo pidiera.
+      await setConfig(nuevo ? { overlayEnabled: true, overlayState: "bubble" } : { overlayEnabled: false });
+      await pintarBotonFlotante();
+      setMensaje(nuevo
+        ? "Panel encendido. Míralo en la pestaña de WhatsApp Web."
+        : "Panel apagado. El atajo Ctrl/Cmd+Shift+C sigue copiando el número.");
     } catch (e) {
-      setMensaje("No se pudo activar el panel.", true);
+      setMensaje("No se pudo cambiar el panel.", true);
     }
   });
+  pintarBotonFlotante();
 
   document.getElementById("buscarCuentas").addEventListener("click", buscarCuentas);
   document.getElementById("cfgGuardar").addEventListener("click", guardarConfig);

@@ -53,11 +53,15 @@
     <style>
       :host, * { box-sizing: border-box; }
       [hidden] { display: none !important; }
-      /* Burbuja, panel y toast viven en (0,0) y se mueven SOLO con transform:
-         composición en GPU, sin layout ni repaint por frame. will-change los
-         promociona a su propia capa desde el arranque (son 3 elementos chicos). */
+      /* Todo lo flotante vive en (0,0) y se mueve SOLO con transform: composición
+         en GPU, sin layout ni repaint por frame.
+         will-change se pone AL ARRASTRAR y se quita al soltar (clase .moviendo).
+         Antes estaba fijo en los cinco elementos, lo que reserva una capa de GPU
+         permanente para cada uno aunque estén ocultos — memoria regalada en el
+         99 % del tiempo, y en un equipo flojo eso importa. */
+      .moviendo { will-change: transform; }
       .launcher {
-        position: fixed; left: 0; top: 0; will-change: transform;
+        position: fixed; left: 0; top: 0;
         width: 46px; height: 46px; border-radius: 50%;
         background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%);
         color:#fff; font-size:22px; border:none; cursor:grab;
@@ -66,11 +70,29 @@
         touch-action:none; user-select:none;
       }
       .launcher.dragging { cursor:grabbing; }
+      /* Forma "barra": el ⚡, el nombre y los D en UNA sola pieza, en vez de la
+         burbuja con el chip al lado. Estorba menos aparcada sobre el nombre del
+         contacto, que es donde mucha gente la deja. */
+      .launcher.barra {
+        width:auto; max-width:260px; height:34px; border-radius:11px;
+        padding:0 11px; gap:7px; font-size:15px;
+        justify-content:flex-start; overflow:hidden;
+      }
+      .launcher.barra .b-nom {
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+        font-size:12.5px; font-weight:700; white-space:nowrap;
+        overflow:hidden; text-overflow:ellipsis;
+      }
+      .launcher.barra .b-ds {
+        font-family:ui-monospace,Menlo,monospace; font-size:12px; font-weight:700;
+        color:#f5f3ff; white-space:nowrap;
+      }
+      .launcher.barra .alerta { color:#fecaca; font-size:13px; }
       /* Chip: la identidad del cliente, siempre a la vista. Mismo truco de
          posicionamiento que la burbuja (fixed en 0,0 + transform) para que
          arrastrar no provoque layout. */
       .chip {
-        position: fixed; left: 0; top: 0; will-change: transform;
+        position: fixed; left: 0; top: 0;
         display:flex; align-items:center; gap:7px;
         max-width: 260px; padding:6px 10px; border-radius:11px;
         background:#fff; color:#1e1b2e; cursor:grab;
@@ -95,7 +117,7 @@
          y puede quedar a la vista en una pantalla compartida. Eso vive en el
          panel, detrás de un clic deliberado. */
       .ficha {
-        position: fixed; left: 0; top: 0; will-change: transform;
+        position: fixed; left: 0; top: 0;
         width: 290px; background:#fff; color:#1e1b2e;
         border-radius:13px; overflow:hidden; padding:11px 12px;
         box-shadow: 0 10px 30px rgba(20,16,41,.28);
@@ -138,7 +160,7 @@
       .ficha .dias.pronto { color:#a16207; font-weight:600; }
       .ficha .mas { color:#9ca3af; font-size:11px; margin-top:5px; }
       .panel {
-        position: fixed; left: 0; top: 0; will-change: transform;
+        position: fixed; left: 0; top: 0;
         width: 300px; max-height: 70vh; display:flex; flex-direction:column;
         background:#fff; color:#1e1b2e; border-radius:14px; overflow:hidden;
         box-shadow: 0 10px 30px rgba(20,16,41,.28);
@@ -152,7 +174,7 @@
       }
       .hdr.dragging { cursor:grabbing; }
       .toast {
-        position: fixed; left: 0; top: 0; will-change: transform;
+        position: fixed; left: 0; top: 0;
         max-width: 220px;
         background: linear-gradient(135deg,#635bff 0%,#8b5cf6 100%); color:#fff;
         border-radius:11px; padding:9px 13px; font-size:12.5px; font-weight:600; line-height:1.3;
@@ -173,7 +195,19 @@
          asomarse al panel. */
       .quien { margin:0 2px 9px; }
       .quien-nom { font-size:16px; font-weight:800; line-height:1.2; }
-      .quien-sub { margin-top:2px; font-size:11.5px; color:#6b7280; font-family:ui-monospace,Menlo,monospace; }
+      .quien-tel {
+        margin-top:3px; display:flex; align-items:center; gap:7px;
+        font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#374151;
+      }
+      .quien-sub { margin-top:3px; font-size:11.5px; color:#6b7280; }
+      .minibtn {
+        background:#f3f0ff; color:#6d28d9; border:1px solid #ddd4ff; border-radius:7px;
+        font-size:11px; font-weight:600; padding:2px 8px; cursor:pointer; white-space:nowrap;
+        font-family:inherit;
+      }
+      .minibtn:hover { background:#ebe5ff; }
+      .minibtn.done { background:#e7f7ee; color:#137a45; border-color:#bfe9cf; }
+      .cperfil { font-size:12px; color:#6b7280; margin:-3px 0 6px; }
 
       /* La secuencia D, con el mismo lenguaje visual que la ficha de la web
          (ClientHistoryPage → ContactDaysPanel). Es lo que hay que dejar escrito
@@ -291,7 +325,18 @@
         </div>
       </div>
     </div>`;
-  document.documentElement.appendChild(host);
+  // El host NO se cuelga del documento aquí. Se construye en memoria y solo se
+  // inserta si el flotante está encendido: apagarlo desde el popup debe dejar la
+  // página de WhatsApp exactamente como si la extensión no existiera. Los nodos
+  // detached aguantan listeners y consultas sin problema, así que el resto del
+  // archivo no se entera.
+  function montarHost() {
+    if (host.isConnected) return;
+    document.documentElement.appendChild(host);
+  }
+  function desmontarHost() {
+    if (host.isConnected) host.remove();
+  }
 
   const elPanel = shadow.getElementById("panel");
   const elLauncher = shadow.getElementById("launcher");
@@ -305,17 +350,20 @@
   // El camino caliente del arrastre no lee NADA del layout: viewport y tamaños
   // van cacheados (resize y ResizeObserver los refrescan), y escribir transform
   // no invalida layout — la GPU compone y ya.
-  const BW = 46;        // tamaño de la burbuja
-  const GAP = 8;        // separación burbuja↔panel/toast
-  let pos = { left: 16, top: 16 }; // esquina sup-izq de la burbuja (se fija en init)
+  const BW = 46;        // lado de la burbuja redonda
+  const GAP = 8;        // separación flotante↔panel/toast
+  let pos = { left: 16, top: 16 }; // esquina sup-izq del flotante (se fija en init)
   let vw = window.innerWidth, vh = window.innerHeight; // viewport cacheado
   let panelW = 300, panelH = 0;                        // tamaño real del panel (ResizeObserver)
   let toastW = 0, toastH = 0;                          // tamaño del toast (medido al mostrarlo)
   let chipW = 0, chipH = 0;                            // tamaño del chip (ResizeObserver)
+  // En forma "barra" el flotante deja de ser un cuadrado de 46: crece con el
+  // nombre del cliente. Se cachea igual que los demás, vía ResizeObserver.
+  let flotW = BW, flotH = BW;
 
   function clampPos(left, top) {
-    const maxLeft = Math.max(0, vw - BW);
-    const maxTop = Math.max(0, vh - BW);
+    const maxLeft = Math.max(0, vw - flotW);
+    const maxTop = Math.max(0, vh - flotH);
     return { left: Math.min(Math.max(0, left), maxLeft), top: Math.min(Math.max(0, top), maxTop) };
   }
   function mover(el, x, y) {
@@ -327,9 +375,9 @@
   // pantalla, con tamaño CACHEADO (nada de offsetWidth/Height por frame) y
   // acotado al viewport para que nunca quede medio afuera.
   function colocarFlotante(el, w, h) {
-    const cx = pos.left + BW / 2, cy = pos.top + BW / 2;
-    const x = cx > vw / 2 ? (pos.left + BW) - w : pos.left;
-    const y = cy < vh / 2 ? pos.top + BW + GAP : pos.top - GAP - h;
+    const cx = pos.left + flotW / 2, cy = pos.top + flotH / 2;
+    const x = cx > vw / 2 ? (pos.left + flotW) - w : pos.left;
+    const y = cy < vh / 2 ? pos.top + flotH + GAP : pos.top - GAP - h;
     mover(el, Math.min(Math.max(0, x), Math.max(0, vw - w)), Math.min(Math.max(0, y), Math.max(0, vh - h)));
   }
   function posicionarPanel() {
@@ -346,9 +394,9 @@
   // demás, para que en la esquina no se salga.
   function posicionarChip() {
     if (!chipH) { chipH = elChip.offsetHeight || 0; chipW = elChip.offsetWidth || 0; }
-    const alaIzquierda = pos.left + BW / 2 > vw / 2;
-    const x = alaIzquierda ? pos.left - GAP - chipW : pos.left + BW + GAP;
-    const y = pos.top + (BW - chipH) / 2;   // centrado con la burbuja
+    const alaIzquierda = pos.left + flotW / 2 > vw / 2;
+    const x = alaIzquierda ? pos.left - GAP - chipW : pos.left + flotW + GAP;
+    const y = pos.top + (flotH - chipH) / 2;   // centrado con la burbuja
     mover(elChip, Math.min(Math.max(0, x), Math.max(0, vw - chipW)),
                   Math.min(Math.max(0, y), Math.max(0, vh - chipH)));
   }
@@ -379,6 +427,15 @@
     chipW = w; chipH = h;
     if (!elChip.hidden) posicionarChip();
   });
+  observarTamano(elLauncher, (w, h) => {
+    // En forma "barra" el flotante crece con el nombre, así que su tamaño manda
+    // sobre dónde caben el panel, la ficha y el chip.
+    flotW = w; flotH = h;
+    pos = clampPos(pos.left, pos.top);
+    aplicarPosBurbuja();
+    if (!elChip.hidden) posicionarChip();
+    if (state === "panel") posicionarPanel();
+  });
 
   // ----- Estado persistido (chrome.storage.local) -----
   // Dos ejes independientes, a propósito:
@@ -391,7 +448,8 @@
   // siempre: recargar no lo devolvía. Ahora la ✕ minimiza y el apagado de verdad
   // es una decisión explícita en Ajustes, que sí se puede deshacer desde ahí.
   let state = "bubble";
-  let overlayEnabled = true;      // el flotante siempre activo (se apaga en Ajustes)
+  let overlayEnabled = true;      // el flotante siempre activo (se apaga desde el popup)
+  let forma = "burbuja";          // "burbuja" | "barra" (Ajustes)
   let tgEnabled = true;           // Telegram encendido por defecto (se apaga en Ajustes)
   let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
   let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
@@ -434,10 +492,19 @@
   function nombreProveedor(acc) {
     return acc.provider || acc.provider_name || acc.proveedor || "";
   }
-  let buscando = false;         // evita búsquedas concurrentes (re-entradas del observer)
-  let firmaActual = null;       // firma del chat abierto AHORA (lo que queremos mostrar)
-  let firmaCargada = null;      // firma del chat al que corresponde datosChat
+  let buscando = false;         // evita búsquedas concurrentes
+  let firmaActual = null;       // firma del chat abierto AHORA
+  let firmaMostrada = null;     // firma que el flotante está reflejando
   let datosChat = null;         // lo que sabemos del chat actual (ver ponerDatos)
+
+  // firmaCargada = "tengo la ficha de este chat". SOLO se marca con datos buenos.
+  //
+  // Antes marcaba cualquier desenlace, incluido "no encontré el número". Eso hacía
+  // que el clic en la burbuja —que existe justamente para buscar a fondo— viera el
+  // chat como resuelto y saliera sin hacer nada: el operador se quedaba mirando el
+  // fracaso de la búsqueda automática sin forma de reintentar.
+  let firmaCargada = null;
+
 
   // ----- Normalización de la respuesta del backend -----
   //
@@ -484,41 +551,20 @@
     };
   }
 
-  // ----- Caché por chat -----
-  //
-  // Antes solo se recordaba el último chat consultado. Ahora la búsqueda salta en
-  // CADA chat que se abre, así que ir y volver entre dos conversaciones —lo más
-  // normal del mundo— sería un request por visita. Con esto, volver es instantáneo.
-  //
-  // El TTL existe porque los días restantes y los estados cambian mientras se
-  // trabaja; el tope, para que una jornada larga no acumule cientos de fichas.
-  const CACHE_TTL_MS = 5 * 60 * 1000;
-  const CACHE_MAX = 30;
-  const cacheChats = new Map();
-
-  function leerCache(firma) {
-    const reg = cacheChats.get(firma);
-    if (!reg) return null;
-    if (Date.now() - reg.ts > CACHE_TTL_MS) { cacheChats.delete(firma); return null; }
-    return reg.datos;
-  }
-
-  function guardarCache(firma, datos) {
-    if (!firma) return;
-    // Map itera en orden de inserción: la primera clave es la más vieja.
-    if (cacheChats.size >= CACHE_MAX && !cacheChats.has(firma)) {
-      cacheChats.delete(cacheChats.keys().next().value);
-    }
-    cacheChats.set(firma, { datos, ts: Date.now() });
-  }
+  // Sin caché de fichas a propósito. La tuve y la quité: se apoyaba en volver al
+  // mismo chat, y aquí se abre la conversación, se resuelve todo de una y se
+  // archiva sin volver en semanas. Nunca acertaba, y guardar fichas de clientes en
+  // el navegador durante meses es coste y riesgo a cambio de nada.
 
   let chipConContenido = false; // ¿el chip tiene algo que decir de este chat?
 
   function aplicarEstadoUI() {
     elLauncher.hidden = !overlayEnabled || state !== "bubble";
-    // El chip acompaña a la burbuja. Con el panel abierto sobra: la misma
-    // información está dentro, y en mayor detalle.
-    elChip.hidden = !overlayEnabled || state !== "bubble" || !chipConContenido;
+    elLauncher.classList.toggle("barra", forma === "barra");
+    // El chip acompaña a la burbuja. Con el panel abierto sobra (la información
+    // está dentro, con más detalle) y en forma "barra" tampoco: ahí el nombre y
+    // los D van dentro del propio flotante.
+    elChip.hidden = !overlayEnabled || forma === "barra" || state !== "bubble" || !chipConContenido;
     elPanel.hidden = !overlayEnabled || state !== "panel";
     if (elChip.hidden) elChip.classList.remove("apagado");
     if (!overlayEnabled || state === "panel") ocultarHover();
@@ -534,11 +580,15 @@
     guardarEstado();
     if (state === "panel") {
       // pintarPanel primero: el panel estaba oculto y por eso no se repintaba,
-      // así que al abrirlo hay que volcar lo que ya sabemos. evaluarChat() solo
-      // añade la búsqueda si el chat cambió mientras estaba cerrado.
+      // así que al abrirlo hay que volcar lo que ya sabemos.
       pintarPanel();
       posicionarPanel();
-      evaluarChat();
+      // Abrir el panel es pedir la ficha de este chat. Si no la tenemos, se busca
+      // a fondo — abriendo "Info. del contacto" y preguntando el número si hace
+      // falta. Es lo que el clic en la burbuja hacía siempre, y lo que se perdió
+      // al aparecer la búsqueda automática.
+      if (!datosChat || datosChat.estado !== "ok") resolverExplicito();
+      else evaluarChat();
     }
   }
 
@@ -629,51 +679,25 @@
     aviso: (texto) => mostrarAviso(texto),
   };
 
-  // Busca la identidad del chat y consulta sus cuentas.
-  //
-  // auto = lo disparó un cambio de chat, no el operador. En ese caso NO puede
-  // tocar la interfaz de WhatsApp (abrir el panel de contacto, sacar el modal):
-  // ocurre solo, a cada chat, y sería insoportable. Con el botón 🔍 sí, porque
-  // ahí el operador está pidiendo explícitamente que se busque.
+  // Busca la identidad del chat y consulta sus cuentas. Siempre a fondo: puede
+  // abrir "Info. del contacto" y, si aun así no aparece el número, pedirlo con el
+  // modal. Solo se llega aquí por una acción deliberada —clic en el flotante,
+  // botón 🔍, o un cambio de chat con el panel abierto—, así que interrumpir está
+  // justificado. Es lo que hacía el clic en la v1.4.0.
   //
   // `buscando` se mantiene hasta que lookup() responde (lo libera su callback).
-  // Chats a los que ya se les abrió el panel de contacto sin encontrar nada. Sin
-  // esto, un chat que de verdad no expone el teléfono abriría el panel cada vez
-  // que se entra en él.
-  const sinNumeroConocido = new Set();
-
-  async function buscarAhora(opts) {
-    const auto = !!(opts && opts.auto);
+  async function buscarAhora() {
     if (buscando) return;
     buscando = true;
     const firmaAlEmpezar = firmaActual;
     ponerDatos({ estado: "buscando" });
 
-    // Primera pasada: solo lectura, sin tocar la interfaz de WhatsApp.
-    let id = await utils.obtenerIdentidad({
-      rapido: auto,
-      permitirPanel: !auto,
-      permitirManual: !auto,
-      motivo: "buscar cuentas",
+    const id = await utils.obtenerIdentidad({
+      permitirPanel: true, permitirManual: true, motivo: "buscar cuentas",
     });
 
-    // Muchos contactos ya no muestran el teléfono en ningún sitio salvo en "Info.
-    // del contacto" — es justo lo que WhatsApp está cambiando. Renunciar ahí
-    // dejaba el chip en "Sin número" en chats donde Ctrl/Cmd+Shift+C sí lo saca,
-    // que es lo peor de los dos mundos. Así que se abre el panel, pero UNA sola
-    // vez por chat: el número se guarda y las visitas siguientes salen de la
-    // caché sin tocar nada.
-    if (auto && !id.numero && id.fuente !== "grupo" && id.clave && !sinNumeroConocido.has(id.clave)) {
-      id = await utils.obtenerIdentidad({
-        rapido: false, permitirPanel: true, permitirManual: false,
-      });
-      if (id.numero) await utils.guardarManual(id.clave, id.numero);
-      else sinNumeroConocido.add(id.clave);
-    }
-
-    // Cambió de chat mientras se resolvía la identidad: lo que venga ya no es de
-    // este chat. Se descarta sin pintar nada — el cambio ya programó su propia
-    // búsqueda.
+    // Cambió de chat mientras se resolvía la identidad (abrir el panel de contacto
+    // tarda medio segundo): lo que venga ya no es de este chat.
     if (firmaChat() !== firmaAlEmpezar) { buscando = false; return; }
 
     if (id.fuente === "grupo") { ponerDatos({ estado: "grupo" }); finBusqueda(); return; }
@@ -683,6 +707,21 @@
       return;
     }
     lookup(id.numero);
+  }
+
+  // Lo que el operador pide a mano: clic en la burbuja o en el chip, y botón 🔍.
+  // Es el camino que abre "Info. del contacto" y, si aun así no aparece el
+  // número, lo pregunta con el modal.
+  function resolverExplicito() {
+    if (!overlayEnabled) return;
+    const firma = firmaChat();
+    if (!firma) { firmaActual = firmaMostrada = null; ponerDatos({ estado: "sin-chat" }); return; }
+    firmaActual = firmaMostrada = firma;
+    if (firma === firmaCargada) {          // ya tenemos su ficha: no re-buscar
+      if (state === "panel") posicionarPanel();
+      return;
+    }
+    buscarAhora();
   }
 
   // Cierra una búsqueda y re-evalúa. Si el chat cambió mientras se buscaba, esa
@@ -701,9 +740,10 @@
   //
   function ponerDatos(d) {
     datosChat = d;
-    // "buscando" es un estado de paso: marcar el chat como cargado con él haría
-    // que evaluarChat() lo diera por resuelto y nunca completara la búsqueda.
-    if (d && d.estado !== "buscando") firmaCargada = firmaActual;
+    // Solo "ok" cuenta como chat resuelto. Los demás desenlaces (sin número,
+    // grupo, error) dejan firmaCargada intacta a propósito, para que un clic
+    // pueda volver a intentarlo a fondo.
+    if (d && d.estado === "ok") firmaCargada = firmaActual;
     pintarChip();
     pintarPanel();
     pintarHover();
@@ -717,9 +757,17 @@
   function pintarChip() {
     const d = datosChat;
 
-    // Sin chat, grupo o error: el chip no dice nada. Un fallo del backend no es
-    // asunto del operador mientras conversa; si abre el panel, ahí lo verá.
-    if (!d || d.estado === "sin-chat" || d.estado === "grupo" || d.estado === "error") {
+    // El chip solo habla cuando tiene algo que decir de ESTE chat.
+    //
+    // "vacio" es el estado normal al abrir una conversación: todavía no se ha
+    // consultado nada, y no se consultará hasta que se pulse. Queda solo la
+    // burbuja, que es la señal de "dame un clic" de toda la vida.
+    //
+    // "sin-numero" también calla: un chip gris en media lista de chats es ruido
+    // encima de WhatsApp. Y un fallo del backend no es asunto del operador
+    // mientras conversa; si abre el panel, ahí lo verá.
+    if (!d || d.estado === "vacio" || d.estado === "sin-chat" ||
+        d.estado === "grupo" || d.estado === "sin-numero" || d.estado === "error") {
       chipConContenido = false;
       aplicarEstadoUI();
       return;
@@ -735,11 +783,7 @@
       return;
     }
 
-    if (d.estado === "sin-numero") {
-      clase = "apagado";
-      html = `<span class="nom">Sin número</span>` +
-             (d.username ? `<span class="nota">${escapeHtml(d.username)}</span>` : "");
-    } else if (!d.found) {
+    if (!d.found) {
       clase = "apagado";
       html = `<span class="nom">Desconocido</span>`;
     } else {
@@ -762,6 +806,26 @@
     chipConContenido = true;
     aplicarEstadoUI();
     if (!elChip.hidden) posicionarChip();
+    pintarLauncher();
+  }
+
+  // En forma "barra" el contenido del chip va DENTRO del flotante, así que el
+  // launcher se repinta cada vez. En "burbuja" se queda con el rayo de siempre.
+  function pintarLauncher() {
+    if (forma !== "barra") {
+      if (elLauncher.textContent !== "⚡") elLauncher.textContent = "⚡";
+      return;
+    }
+    const d = datosChat;
+    const util = d && d.estado === "ok" && d.found;
+    if (!util) { elLauncher.innerHTML = "⚡"; return; }
+    const alerta = (d.notas.length || d.garantia || tieneCuentaCaida(d))
+      ? `<span class="alerta">●</span>` : "";
+    elLauncher.innerHTML =
+      "⚡" +
+      `<span class="b-nom">${escapeHtml(d.nombre || "Cliente")}</span>` +
+      (d.dStr ? `<span class="b-ds">${escapeHtml(d.dStr)}</span>` : "") +
+      alerta;
   }
 
   // Alguna cuenta madre caída: lo que el cliente está escribiendo probablemente
@@ -808,7 +872,8 @@
     // Con el panel abierto sobra: la misma información está dentro y con más
     // detalle. Y durante el arrastre solo estorbaría.
     if (!overlayEnabled || state !== "bubble" || arrastrando) return;
-    if (!datosChat || !chipConContenido) return;
+    // Basta con que haya un chat abierto: sin datos aún, la ficha invita a pulsar.
+    if (!datosChat || datosChat.estado === "sin-chat") return;
     hoverAbierto = true;
     pintarHover();
   }
@@ -822,11 +887,12 @@
     // al cambiar de chat con el ratón encima, parpadearía.
     if (d.estado === "buscando" && !elFicha.hidden) return;
 
-    if (d.estado === "sin-numero") {
-      elFicha.innerHTML =
-        `<div class="cab"><b>Sin número</b></div>` +
-        (d.username ? `<div class="tel">${escapeHtml(d.username)}</div>` : "") +
-        `<div class="flag gris">WhatsApp no expone el teléfono en este chat. Ábrelo para escribirlo una vez y lo recuerdo.</div>`;
+    // Antes de consultar, la ficha invita a hacerlo en vez de quedarse vacía.
+    if (d.estado === "vacio" || d.estado === "sin-numero" || d.estado === "grupo") {
+      const texto = d.estado === "grupo"
+        ? "Es un chat de grupo: no tiene un número único."
+        : "Haz clic para buscar las cuentas de este contacto.";
+      elFicha.innerHTML = `<div class="flag gris">${texto}</div>`;
     } else if (!d.found) {
       elFicha.innerHTML =
         `<div class="cab"><b>Desconocido</b></div>` +
@@ -947,20 +1013,17 @@
     if (!d) { setMsg("Abre un chat para ver las cuentas."); return; }
 
     if (d.estado === "buscando") { setMsg("Buscando…"); return; }
+    if (d.estado === "vacio") { setMsg("Buscando…"); return; }
     if (d.estado === "sin-chat") { setMsg("Abre un chat para ver las cuentas."); return; }
     if (d.estado === "grupo") { setMsg("Es un chat de grupo: no tiene un número único."); return; }
     if (d.estado === "error") { setMsg(escapeHtml(d.mensaje || "Error al consultar."), true); return; }
 
     if (d.estado === "sin-numero") {
+      // Sin botón intermedio: al abrir el panel ya se buscó a fondo y, si hacía
+      // falta, salió el modal. Si se llega aquí es que no se pudo o se canceló,
+      // y para reintentar está el 🔍 de la cabecera.
       const quien = d.username ? ` de <b>${escapeHtml(d.username)}</b>` : "";
-      setBody(
-        `<div class="msg">WhatsApp no muestra el número${quien} en este chat.</div>` +
-        `<button class="pedir" id="btnTeclear">✏️ Escribir el número</button>`
-      );
-      // Reintento explícito: al no ser automático, sí puede abrir el panel de
-      // contacto y, si aun así no aparece, pedirlo por el modal (y recordarlo).
-      const b = shadow.getElementById("btnTeclear");
-      if (b) b.addEventListener("click", () => buscarAhora({ auto: false }));
+      setBody(`<div class="msg">No se pudo leer el número${quien} de este chat.<br>Usa 🔍 para reintentar.</div>`);
       return;
     }
 
@@ -981,23 +1044,24 @@
 
   // Cabecera del panel: quién es y qué D debe llevar su contacto.
   function cabeceraHtml(d, nCuentas) {
-    const sub = [
-      escapeHtml(d.termino),
-      typeof nCuentas === "number" ? nCuentas + (nCuentas === 1 ? " cuenta" : " cuentas") : "",
-    ].filter(Boolean).join(" · ");
     return (
       `<div class="quien">` +
         (d.nombre ? `<div class="quien-nom">${escapeHtml(d.nombre)}</div>` : "") +
-        `<div class="quien-sub">${sub}</div>` +
+        `<div class="quien-tel">` +
+          `<span>${escapeHtml(d.termino)}</span>` +
+          `<button class="minibtn" id="btnCopiarNum" title="Copiar el número">Copiar</button>` +
+        `</div>` +
+        (typeof nCuentas === "number"
+          ? `<div class="quien-sub">${nCuentas} ${nCuentas === 1 ? "cuenta" : "cuentas"}</div>`
+          : "") +
       `</div>` +
       `<div class="dcard">` +
         `<div class="dcard-tit">Google Contacts — debe tener</div>` +
         (d.dStr
           ? `<div class="dcard-ds">${escapeHtml(d.dStr)}</div>` +
-            `<div class="dcard-acc">` +
-              `<button class="dbtn" id="btnCopiarD">Copiar</button>` +
-              `<button class="dbtn" id="btnContacts">Abrir contacts</button>` +
-            `</div>`
+            // Solo "Abrir contacts": ya copia la secuencia al abrir, así que un
+            // botón aparte para copiar un "D17" suelto sobraba.
+            `<div class="dcard-acc"><button class="dbtn" id="btnContacts">Abrir contacts</button></div>`
           : `<div class="dcard-ds vacio">(ningún D)</div>`) +
       `</div>`
     );
@@ -1006,12 +1070,14 @@
   // Cablea los botones de la tarjeta D. Va aparte porque la cabecera se pinta
   // desde dos sitios (con cuentas y sin ellas).
   function cablearCabecera(d) {
-    const bCopiar = shadow.getElementById("btnCopiarD");
-    if (bCopiar) {
-      bCopiar.addEventListener("click", async () => {
-        await copiar(d.dStr);
-        bCopiar.textContent = "¡Copiado!"; bCopiar.classList.add("done");
-        setTimeout(() => { bCopiar.textContent = "Copiar"; bCopiar.classList.remove("done"); }, 1400);
+    // Copiar el número: con el panel abierto no había forma de sacarlo, y es de
+    // lo que más se usa. El atajo Ctrl/Cmd+Shift+C solo sirve con el panel cerrado.
+    const bNum = shadow.getElementById("btnCopiarNum");
+    if (bNum) {
+      bNum.addEventListener("click", async () => {
+        await copiar(d.termino);
+        bNum.textContent = "¡Copiado!"; bNum.classList.add("done");
+        setTimeout(() => { bNum.textContent = "Copiar"; bNum.classList.remove("done"); }, 1400);
       });
     }
     const bContacts = shadow.getElementById("btnContacts");
@@ -1056,6 +1122,7 @@
       return `
         <div class="card${disney ? " card-disney" : ""}">
           <div class="ctitle">${escapeHtml(acc.account_type_name || "Cuenta")}${disney ? '<span class="dbadge">DISNEY</span>' : ""}</div>
+          ${acc.profile_name ? `<div class="cperfil">${escapeHtml(acc.profile_name)}</div>` : ""}
           <div class="cemail">${escapeHtml(acc.provider_email || "—")}</div>
           <div class="meta">
             <span class="badge${active ? " active" : ""}">${escapeHtml(acc.status || "")}</span>
@@ -1067,7 +1134,7 @@
           ${caida ? `<div class="aviso caida">⚠️ La cuenta madre está caída: si reclama, es <b>garantía</b>.</div>` : ""}
           ${acc.payment_deadline ? `<div class="aviso plazo">⏳ Plazo de pago hasta el <b>${escapeHtml(acc.payment_deadline)}</b>.</div>` : ""}
           <button class="copy" data-email="${escapeHtml(acc.provider_email || "")}">Copiar correo</button>
-          ${acc.renewal_message ? `<button class="renov" data-idx="${i}">💬 Copiar mensaje de renovación</button>` : ""}
+          ${acc.provider_password ? `<button class="renov" data-idx="${i}">🔑 Copiar datos</button>` : ""}
           ${botonCodigo(acc, escapeHtml(acc.provider_email || ""))}
           <div class="codigo-slot"></div>
         </div>`;
@@ -1086,16 +1153,20 @@
       });
     });
 
-    // El mensaje de renovación se coge de los datos, no de un atributo: lleva
-    // saltos de línea, asteriscos y comillas, y meterlo en el HTML sería pedir
-    // que un correo con un carácter raro rompa la tarjeta.
+    // "Copiar datos" = correo + TAB + contraseña, el mismo formato que la web
+    // (credentialsString en frontend/src/lib/accountAccess.ts). El tabulador salta
+    // del campo de correo al de contraseña, así que se entra con un solo pegado.
+    //
+    // La contraseña se lee de los datos y no de un atributo del HTML: puede llevar
+    // comillas y símbolos, y meterla en el markup sería pedir que una contraseña
+    // con un carácter raro rompa la tarjeta.
     shadow.querySelectorAll(".renov").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const acc = ord[Number(btn.getAttribute("data-idx"))];
-        if (!acc || !acc.renewal_message) return;
-        await copiar(acc.renewal_message);
+        if (!acc || !acc.provider_password) return;
+        await copiar((acc.provider_email || "") + "\t" + acc.provider_password);
         const orig = btn.textContent;
-        btn.textContent = "¡Copiado! Pégalo en el chat"; btn.classList.add("done");
+        btn.textContent = "¡Copiado! correo y clave"; btn.classList.add("done");
         setTimeout(() => { btn.textContent = orig; btn.classList.remove("done"); }, 1600);
       });
     });
@@ -1220,7 +1291,6 @@
       if (fallo) { ponerDatos({ estado: "error", mensaje: fallo }); finBusqueda(); return; }
 
       const datos = normalizarLookup(resp.data, termino);
-      guardarCache(firmaAlEmpezar, datos);
       ponerDatos(datos);
       // Solo si el panel sigue abierto: si se minimizó mientras la respuesta
       // venía en vuelo, no hay que medir/posicionar un panel oculto.
@@ -1241,57 +1311,68 @@
     return txt.slice(0, 120);
   }
 
+  // Se llama desde el sondeo. Su único trabajo con el panel cerrado es detectar
+  // que cambiaste de conversación y limpiar: nunca consulta la API por su cuenta.
   function evaluarChat() {
     if (!overlayEnabled) return;
+    if (buscando) return;
 
     const firma = firmaChat();
-    if (!firma) {
-      firmaActual = null;
-      if (datosChat && datosChat.estado === "sin-chat") return;
-      ponerDatos({ estado: "sin-chat" });
-      return;
-    }
-
-    firmaActual = firma;
-    if (firma === firmaCargada) {          // ya sabemos de este chat
+    if (firma === firmaMostrada) {         // seguimos donde estábamos
       if (state === "panel") posicionarPanel();
       return;
     }
 
-    const guardado = leerCache(firma);     // visitado hace poco: sin red
-    if (guardado) { ponerDatos(guardado); if (state === "panel") posicionarPanel(); return; }
+    // Cambió de conversación. Lo que hubiera pintado es de OTRA persona, así que
+    // se borra ya. Dejar el nombre y los D del cliente anterior sobre un chat
+    // distinto es peor que no mostrar nada.
+    firmaActual = firma;
+    firmaMostrada = firma;
+    firmaCargada = null;
+    ponerDatos({ estado: firma ? "vacio" : "sin-chat" });
 
-    if (buscando) return;                  // hay una en vuelo; finBusqueda re-evalúa
-    buscarAhora({ auto: true });
+    // Con el panel abierto sí se busca sola: dejarlo abierto es el gesto de
+    // "muéstrame siempre el chat en el que estoy". Cerrado, se espera al clic.
+    if (firma && state === "panel") resolverExplicito();
   }
 
-  // debounce con maxWait para no morir bajo mutaciones constantes
-  let timer = null, primerScheduled = 0;
-  function schedule() {
-    // Antes esto salía cuando el panel estaba cerrado, para no gastar CPU. Ya no
-    // se puede: el chip tiene que estar al día SIEMPRE, que es justo la gracia de
-    // no tener que abrir nada. Lo que sostiene el coste son el debounce de abajo
-    // y la comparación por firma en evaluarChat(), que corta antes de tocar la red
-    // en la inmensa mayoría de las mutaciones.
-    if (!overlayEnabled) return;
-    // Pestaña en segundo plano: WhatsApp sigue mutando el DOM (mensajes que
-    // entran, presencia) pero no hay nadie mirando. Al volver, visibilitychange
-    // re-evalúa, así que no se pierde nada.
-    if (document.hidden) return;
+  // ----- Detección de cambio de chat: sondeo, no MutationObserver -----
+  //
+  // Antes esto era un MutationObserver sobre document.documentElement con
+  // subtree:true — el más amplio posible. WhatsApp muta el DOM sin descanso
+  // (indicadores de "escribiendo…", animaciones, mensajes que entran, presencia),
+  // así que ese observer recibe callbacks a un ritmo que no controlamos y que
+  // depende de cuánta actividad haya. En un equipo flojo eso se nota.
+  //
+  // Lo único que necesitamos saber es si CAMBIÓ el chat. Un sondeo lo responde con
+  // coste fijo y conocido: un querySelector y una comparación de cadenas cada
+  // SONDEO_MS. Deja de importar cuánto mute WhatsApp.
+  //
+  // El precio es hasta SONDEO_MS de retardo en notar el cambio, contra los 350 ms
+  // del debounce anterior. Para limpiar el flotante da igual, y la búsqueda con el
+  // panel abierto arranca igual de rápido en cuanto se detecta.
+  const SONDEO_MS = 700;
+  let sondeo = null;
 
-    const ahora = performance.now();
-    if (!timer) primerScheduled = ahora;
-    if (timer) clearTimeout(timer);
-    const espera = ahora - primerScheduled > 1500 ? 0 : 350;
-    timer = setTimeout(() => { timer = null; evaluarChat(); }, espera);
+  function arrancarSondeo() {
+    if (sondeo || !overlayEnabled) return;
+    sondeo = setInterval(() => {
+      // Pestaña en segundo plano: nadie está mirando y WhatsApp sigue vivo. Al
+      // volver, visibilitychange evalúa de inmediato.
+      if (document.hidden) return;
+      evaluarChat();
+    }, SONDEO_MS);
+  }
+
+  function pararSondeo() {
+    if (!sondeo) return;
+    clearInterval(sondeo);
+    sondeo = null;
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) schedule();
+    if (!document.hidden) evaluarChat();
   });
-
-  const observer = new MutationObserver(schedule);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
 
   // ----- Botones -----
   // ✕ minimiza a la burbuja. No apaga nada: el flotante está siempre disponible y
@@ -1300,17 +1381,26 @@
   shadow.getElementById("btnClose").addEventListener("click", () => setState("bubble"));
   // 🔍 fuerza re-búsqueda: invalida la caché de ESTE chat y busca de nuevo. Al ser
   // una acción explícita, puede abrir el panel de contacto y pedir el número.
-  shadow.getElementById("btnRefresh").addEventListener("click", () => {
-    if (firmaActual) cacheChats.delete(firmaActual);
-    // También se olvida el "aquí no hay número": si se pulsa refrescar es
-    // justamente para que vuelva a intentarlo todo.
-    sinNumeroConocido.clear();
+  shadow.getElementById("btnRefresh").addEventListener("click", async () => {
     firmaCargada = null;
-    buscarAhora({ auto: false });
+    // Refrescar también olvida el número aprendido de este chat. Es la única
+    // salida si alguna vez se guardó uno equivocado: la caché (S4) se consulta
+    // antes que el panel de contacto (S5), así que un número malo se quedaría
+    // pegado para siempre.
+    const info = utils.jidDelChat();
+    if (info && info.jid) await utils.olvidarManual(info.jid);
+    resolverExplicito();
   });
 
   // ----- Arrastre (burbuja y cabecera del panel) -----
   const DRAG_UMBRAL = 5;
+
+  // Solo lo que de verdad se mueve en el frame necesita capa propia.
+  function marcarMoviendo(si) {
+    [elLauncher, elChip, elPanel, elToast].forEach((el) => {
+      el.classList.toggle("moviendo", si);
+    });
+  }
 
   function persistirPos() {
     try { chrome.storage.local.set({ overlayPos: { left: pos.left, top: pos.top } }); } catch (_) {}
@@ -1345,6 +1435,7 @@
       if (movido && aplicarFinal) frame(); // aplica la última coordenada ya mismo
       d = null;
       arrastrando = false;
+      marcarMoviendo(false);   // devuelve las capas de GPU
       handle.classList.remove("dragging");
       if (movido) persistirPos();
       return movido;
@@ -1365,6 +1456,8 @@
         d.moved = true;
         arrastrando = true;
         ocultarHover();   // la ficha estorba mientras se coloca la burbuja
+        // Se promocionan a capa propia justo ahora, para los frames que vienen.
+        marcarMoviendo(true);
         handle.classList.add("dragging"); // una sola vez, no en cada move
       }
       if (!d.raf) d.raf = requestAnimationFrame(frame);
@@ -1437,19 +1530,34 @@
     return clampPos(vw - 16 - BW, vh - 96 - BW);
   }
 
-  function arrancar() {
+  // Aplica el interruptor maestro. Apagado significa apagado: nada colgado del
+  // DOM de WhatsApp y ningún temporizador corriendo. Ctrl/Cmd+Shift+C sigue
+  // funcionando porque va por chrome.commands, y numero-utils cae a alert() y
+  // window.prompt() cuando no encuentra esta interfaz.
+  function aplicarEncendido() {
+    if (!overlayEnabled) {
+      pararSondeo();
+      ocultarHover();
+      desmontarHost();
+      return;
+    }
+    montarHost();
+    pintarLauncher();
     aplicarPosBurbuja();
     aplicarEstadoUI();
     if (state === "panel") posicionarPanel();
-    // Se evalúa siempre, no solo con el panel abierto: el chip tiene que salir
-    // solo al cargar la página, sin que nadie abra nada.
+    arrancarSondeo();
     evaluarChat();
+  }
+
+  function arrancar() {
+    aplicarEncendido();
   }
 
   // ----- Init -----
   try {
     chrome.storage.local.get(
-      ["overlayState", "overlayEnabled", "overlayCollapsed", "overlayPos", "tgEnabled", "tgBotKh", "tgBotWolf"],
+      ["overlayState", "overlayEnabled", "overlayForma", "overlayPos", "tgEnabled", "tgBotKh", "tgBotWolf"],
       (cfg) => {
         // Migración: quien pulsó la ✕ en una versión anterior tiene guardado
         // "hidden" y, sin esto, seguiría sin ver el flotante después de
@@ -1466,6 +1574,7 @@
           // ajuste debe ver el flotante.
           if (cfg && cfg.overlayEnabled === false) overlayEnabled = false;
         }
+        if (cfg && cfg.overlayForma === "barra") forma = "barra";
         pos = (cfg && cfg.overlayPos && typeof cfg.overlayPos.left === "number")
           ? clampPos(cfg.overlayPos.left, cfg.overlayPos.top)
           : posDefecto();
@@ -1491,8 +1600,7 @@
         const activo = changes.overlayEnabled.newValue !== false;
         if (activo !== overlayEnabled) {
           overlayEnabled = activo;
-          aplicarEstadoUI();
-          if (overlayEnabled && state === "panel") { posicionarPanel(); evaluarChat(); }
+          aplicarEncendido();   // monta o desmonta de verdad, sin recargar
         }
       }
 
@@ -1506,6 +1614,13 @@
           aplicarEstadoUI();
           if (overlayEnabled && state === "panel") { posicionarPanel(); evaluarChat(); }
         }
+      }
+
+      if (changes.overlayForma) {
+        forma = changes.overlayForma.newValue === "barra" ? "barra" : "burbuja";
+        pintarLauncher();
+        aplicarEstadoUI();
+        if (overlayEnabled) { aplicarPosBurbuja(); if (!elChip.hidden) posicionarChip(); }
       }
 
       if (changes.tgEnabled) tgEnabled = !!changes.tgEnabled.newValue;

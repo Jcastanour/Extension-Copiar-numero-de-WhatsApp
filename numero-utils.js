@@ -386,6 +386,25 @@
     });
   }
 
+  // Olvida el número aprendido de un chat. La caché se consulta antes que el
+  // panel de contacto, así que sin esto un número mal leído se quedaría pegado
+  // para siempre y no habría forma de corregirlo desde la interfaz.
+  function olvidarManual(clave) {
+    return new Promise(function (resolve) {
+      if (!clave || !window.chrome || !chrome.storage || !chrome.storage.local) return resolve();
+      try {
+        chrome.storage.local.get(CLAVE_CACHE, function (cfg) {
+          var mapa = (cfg && cfg[CLAVE_CACHE]) || {};
+          if (!(clave in mapa)) return resolve();
+          delete mapa[clave];
+          var datos = {};
+          datos[CLAVE_CACHE] = mapa;
+          chrome.storage.local.set(datos, function () { resolve(); });
+        });
+      } catch (e) { resolve(); }
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Salida
   // ---------------------------------------------------------------------------
@@ -530,6 +549,10 @@
       if (!yaEstaba) cerrarPanelContacto(); // siempre, aunque no hayamos encontrado nada
       userPanel = leido.username;
       if (leido.numero) {
+        // NO se guarda en caché a propósito. Guardar el número de cada chat que
+        // se abre haría crecer el storage sin tope durante meses, y no serviría de
+        // nada a los otros dos trabajadores: chrome.storage.local es de esta
+        // máquina. Solo se recuerda lo que cuesta de verdad: lo tecleado a mano.
         return armar(leido.numero, leido.username || (sis && sis.username), leido.fuenteNumero || "panel", base);
       }
     }
@@ -618,6 +641,7 @@
 
     leerManual: leerManual,
     guardarManual: guardarManual,
+    olvidarManual: olvidarManual,
 
     obtenerIdentidad: obtenerIdentidad,
     obtenerUsuario: obtenerUsuario,

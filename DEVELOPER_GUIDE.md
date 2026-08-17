@@ -15,7 +15,7 @@ cambie su interfaz (que lo hace a menudo).
 - **`popup.html` / `popup.js`**: la ventanita del icono. Botones de acción, la
   búsqueda de cuentas y los ajustes.
 - **`overlay.js`**: el panel flotante dentro de WhatsApp Web. Detecta el cambio de
-  chat con un MutationObserver y muestra las cuentas sin abrir el popup.
+  chat con un sondeo ligero (ver §6) y muestra las cuentas sin abrir el popup.
   Además publica `window.__elixirUI`, que da modal y toast al resto de scripts.
 
 ---
@@ -118,10 +118,12 @@ Desde la v1.5.0 hay **dos ejes independientes**, y esa separación es deliberada
 | Clave en `chrome.storage.local` | Qué significa |
 |---|---|
 | `overlayState` | Dónde estoy: `bubble` (por defecto) o `panel` |
-| `overlayEnabled` | Si el flotante existe. Solo se apaga desde Ajustes del popup |
+| `overlayEnabled` | Si el flotante existe. Se apaga desde la pantalla principal del popup |
+| `overlayForma` | `burbuja` (redonda + chip al lado) o `barra` (una sola pieza alargada) |
 
-En `bubble` se ven la burbuja ⚡ y el **chip** con el nombre y los D del cliente; en `panel`, el
-panel abierto (el chip sobra, porque su información está dentro y con más detalle).
+En `bubble` se ven el flotante ⚡ y, en forma burbuja, el **chip** con el nombre y los D del cliente;
+en forma barra ese contenido va dentro del propio flotante. En `panel` no se ve ninguno de los dos,
+porque su información está dentro y con más detalle.
 
 **Por qué se separaron.** Antes había un tercer estado, `hidden`, al que llevaba la ✕ del panel. Se
 persistía, así que sobrevivía a recargar: quien pulsaba la ✕ sin conocer el atajo
@@ -139,51 +141,84 @@ Ahora la ✕ minimiza y el apagado real es una decisión explícita, que se desh
 
 Salidas que conviene mantener:
 
-1. El checkbox de Ajustes (patrón calcado de `cfgTgEnabled`, con el default seguro `x !== false`).
-2. El botón `◱` del popup, que además fuerza `overlayEnabled: true` — es lo primero que prueba
-   quien no encuentra el panel.
-3. `chrome.storage.onChanged` aplica ambas claves **en vivo**, sin recargar WhatsApp. Ojo: ahí se
-   llama a `aplicarEstadoUI()` y no a `setState()`, para no volver a escribir en storage y provocar
-   un bucle de eventos.
+1. **Un solo interruptor**, en la pantalla principal del popup, que muestra el estado actual
+   (Encendido / Apagado) con el default seguro `x !== false`. Antes había un botón `◱` ahí y un
+   check en Ajustes gobernando lo mismo: apagabas en Ajustes, el botón de fuera lo encendía y el
+   check seguía desmarcado. **No volver a duplicarlo.**
+2. `chrome.storage.onChanged` aplica los cambios **en vivo**, sin recargar WhatsApp. Ojo: ahí se
+   llama a `aplicarEncendido()` / `aplicarEstadoUI()` y no a `setState()`, para no volver a escribir
+   en storage y provocar un bucle de eventos.
 
 Regla general: **ninguna acción de un clic debe poder dejar la extensión sin una salida visible.**
 
 ---
 
-## 🔎 5. El chip, la ficha y por qué la búsqueda corre siempre
+## 🔎 5. Quién busca, cuándo, y por qué NO hay cachés
 
-El chip es el sustituto del nombre del contacto de Google Contacts, que es donde vivían el nombre
-real del cliente y su secuencia D hasta que WhatsApp empezó a esconder el teléfono. Para que sirva
-tiene que estar al día sin que nadie abra nada, así que `schedule()` **ya no** sale temprano cuando
-el panel está cerrado. Lo que sostiene el coste:
+**El clic manda.** Abrir un chat no consulta nada. El clic en el flotante llama a `buscarAhora()`,
+que busca a fondo: puede abrir "Info. del contacto" de WhatsApp y, si aun así no aparece el número,
+pedirlo con el modal. Con el panel **abierto** sí se re-busca al cambiar de chat, porque dejarlo
+abierto es el gesto de "muéstrame siempre dónde estoy".
 
-- Debounce de 350 ms con `maxWait` 1500 ms.
-- `evaluarChat()` compara por `firmaChat()` (solo el título del chat, no el subtítulo de presencia)
-  y corta antes de tocar la red en casi todas las mutaciones.
-- Nada con la pestaña en segundo plano; `visibilitychange` re-evalúa al volver.
-- Caché por conversación: 30 entradas, TTL 5 min.
+Al cambiar de conversación se **limpia todo** (`estado: "vacio"`). Es seguridad, no estética: dejar
+el nombre y los D del cliente anterior encima de otro chat es peor que no mostrar nada.
 
-Tres detalles que parecen de adorno y no lo son:
+Se probaron y se quitaron dos cachés. **No volver a añadirlas sin cambiar el flujo de trabajo:**
 
-- **La búsqueda automática usa `rapido: true`**, que impide abrir el panel de contacto de WhatsApp
-  y sacar el modal. Ocurre sola en cada chat: si tocara la interfaz sería insoportable. Solo el
-  botón 🔍, que es explícito, puede hacerlo.
-- **Toda búsqueda termina en `finBusqueda()`**, que re-evalúa. Si el chat cambió a media búsqueda,
-  el guard de `buscando` bloqueó la segunda y sin esto el chat nuevo no se consultaría nunca.
-- **La ficha del hover no lleva correos ni contraseñas.** Se despliega sola con solo pasar el ratón
-  y puede quedar a la vista en una pantalla compartida. Eso vive en el panel, tras un clic.
+- *Caché de fichas por firma de chat.* Son tres trabajadores en tres computadores, y el flujo es
+  abrir el chat, resolver de una y archivar sin volver en semanas. No acertaba nunca.
+- *Guardar el número leído del panel de contacto.* Crecería con cada chat abierto durante meses, y
+  `chrome.storage.local` es de una sola máquina: no le sirve a los otros dos.
+
+Sí se conserva `numerosManuales`, solo para lo que el operador **teclea a mano**: es acotado y es lo
+único que duele volver a escribir. `olvidarManual()` (botón 🔍) existe porque esa caché se consulta
+antes que el panel de contacto, así que un número mal tecleado se quedaría pegado para siempre.
+
+`firmaCargada` significa **"tengo la ficha de este chat"** y solo se marca con `estado: "ok"`. Un
+día lo puse también en los fracasos y el clic dejó de funcionar: `evaluarChat()` daba el chat por
+resuelto y la búsqueda a fondo no llegaba a ejecutarse nunca.
 
 `normalizarLookup()` traduce la respuesta del backend en un solo sitio y **ningún campo nuevo es
-obligatorio**: producción puede ir por detrás de test, y la extensión tiene que funcionar contra
-ambos contratos. Lo que falte, no se pinta.
+obligatorio**: producción puede ir por detrás de test y la extensión debe funcionar contra ambos
+contratos. Lo que falte, no se pinta.
 
 Los D **no se derivan en la extensión**. La convención (D01–D03 con cero, D4+ sin él, dedupe, y que
-D31 no existe) vive en el backend, y duplicarla aquí sería garantizar que un día diverja de lo que
-ve el operador en la web.
+D31 no existe) vive en el backend; duplicarla aquí sería garantizar que un día diverja de lo que ve
+el operador en la web.
+
+La ficha del hover **no lleva correos ni contraseñas**: se despliega sola con pasar el ratón y puede
+quedar a la vista en una pantalla compartida. Eso vive en el panel, tras un clic deliberado.
 
 ---
 
-## ⌨️ 6. Atajos
+## ⚡ 6. Rendimiento (hay un equipo flojo, y va en Edge)
+
+Tres decisiones que existen por eso, y que conviene no deshacer:
+
+**Sondeo, no `MutationObserver`.** Antes se observaba `document.documentElement` con `subtree:true`.
+WhatsApp muta el DOM sin descanso (indicadores de "escribiendo…", animaciones, presencia), así que
+ese observer recibe callbacks a un ritmo que no controlamos. Ahora un `setInterval` de `SONDEO_MS`
+(700) compara `firmaChat()`: un `querySelector` y una comparación de cadenas, coste fijo y medible.
+Se para con `document.hidden` y con el flotante apagado. El precio es hasta 700 ms en notar el
+cambio de chat, que para limpiar el flotante da igual.
+
+**Apagado = apagado.** Con `overlayEnabled: false` el Shadow DOM **no se cuelga del documento** y no
+corre ningún temporizador: WhatsApp queda como si la extensión no existiera. El host se construye
+igualmente en memoria (los nodos detached aguantan listeners), así que encenderlo desde el popup es
+inmediato y sin recargar. `Ctrl/Cmd+Shift+C` sigue funcionando porque va por `chrome.commands`, y
+`numero-utils` cae a `alert()` y `window.prompt()` cuando no encuentra `window.__elixirUI`.
+
+**`will-change` solo al arrastrar.** Estaba fijo en cinco elementos, lo que reserva una capa de GPU
+permanente para cada uno aunque estén ocultos. Ahora se pone con la clase `.moviendo` al empezar el
+arrastre y se quita al soltar.
+
+**Edge** es Chromium: mismo `chrome.*`, mismo MV3. Se carga por `edge://extensions` y los atajos se
+asignan en `edge://extensions/shortcuts`, donde conviene revisar `Ctrl+Space` porque suele estar
+cogido por el navegador.
+
+---
+
+## ⌨️ 7. Atajos
 
 Chrome solo permite **4 comandos con tecla sugerida** por extensión, y el manifest
 ya los tiene todos (`_execute_action` cuenta). Por eso:
@@ -196,7 +231,7 @@ ya los tiene todos (`_execute_action` cuenta). Por eso:
 
 ---
 
-## 🧪 7. Probar sin recargar nada
+## 🧪 8. Probar sin recargar nada
 
 En las DevTools de WhatsApp Web, cambia el contexto de la consola de `top` a
 **"Copiar número de WhatsApp"** y evalúa:

@@ -79,8 +79,26 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
-      margin-top: 10px;
+      margin-top: 6px;
     }
+    .grupo-tit {
+      font-size: 12px; font-weight: 700; color: var(--muted);
+      margin: 14px 0 0; text-transform: uppercase; letter-spacing: .3px;
+    }
+    /* Interruptor del flotante: dice en qué estado está, no solo qué hace. */
+    .btn-toggle {
+      width: 100%; margin-top: 8px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: #fff; color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-toggle:hover { background: #f7f6fc; }
+    .pastilla {
+      font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+      background: #eef0f4; color: #4b5563;
+    }
+    .pastilla.on { background: #e7f7ee; color: #137a45; }
+    .pastilla.off { background: #fdeaea; color: #b42318; }
     .btn-secondary {
       background: #fff;
       color: var(--brand-accent);
@@ -222,7 +240,7 @@
       display: block; font-size: 12px; font-weight: 600;
       color: var(--muted); margin-bottom: 5px;
     }
-    .field input {
+    .field input, .field select {
       width: 100%;
       padding: 9px 11px;
       font-size: 13px;
@@ -231,7 +249,8 @@
       background: #fff;
       color: var(--text);
     }
-    .field input:focus { outline: none; border-color: var(--brand-2); box-shadow: 0 0 0 3px rgba(139,92,246,.15); }
+    .field select { font-family: inherit; }
+    .field input:focus, .field select:focus { outline: none; border-color: var(--brand-2); box-shadow: 0 0 0 3px rgba(139,92,246,.15); }
     #cfgEstado { font-size: 13px; color: var(--ok-fg); margin-left: 10px; font-weight: 600; }
     .hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
     .manual-row { display: flex; gap: 6px; margin-top: 8px; }
@@ -262,24 +281,30 @@
   <div class="topbar">
     <div class="brand"><span class="logo">⚡</span> Elixir Cuentas</div>
     <div style="display:flex; gap:6px;">
-      <!-- Única salida fiable si se ocultó el panel flotante: el atajo de teclado
-           puede estar ocupado por el navegador y el estado sobrevive a recargar. -->
-      <button id="btnMostrarPanel" class="icon-btn" title="Mostrar el panel flotante en WhatsApp">◱</button>
       <button id="btnAjustes" class="icon-btn" title="Ajustes">⚙</button>
     </div>
   </div>
 
   <!-- Vista principal -->
   <div id="vistaPrincipal" class="content">
-    <button id="buscarCuentas" class="btn btn-primary">🔍 Buscar cuentas (Disney)</button>
+    <button id="buscarCuentas" class="btn btn-primary">🔍 Buscar cuentas</button>
 
+    <!-- Interruptor del flotante. Vive aquí y NO en Ajustes: antes había un botón
+         aquí y un check allá controlando lo mismo, y se contradecían — apagabas en
+         Ajustes, el botón de fuera lo encendía y el check seguía desmarcado. -->
+    <button id="btnFlotante" class="btn btn-toggle">
+      <span id="btnFlotanteTxt">Panel flotante</span>
+      <span id="btnFlotanteEstado" class="pastilla">…</span>
+    </button>
+
+    <div class="grupo-tit">Copiar del chat abierto</div>
     <div class="acciones">
+      <button id="copyNumber" class="btn btn-secondary">Número</button>
+      <button id="copyName" class="btn btn-secondary">Nombre</button>
+      <button id="copyUsername" class="btn btn-secondary">Usuario @</button>
       <button id="abrirContacts" class="btn btn-secondary">Abrir contactos</button>
-      <button id="copyName" class="btn btn-secondary">Copiar Nombre</button>
-      <button id="copyNumber" class="btn btn-secondary">Copiar Número</button>
-      <button id="copyUsername" class="btn btn-secondary">Copiar Usuario @</button>
-      <button id="buscarElixir" class="btn btn-secondary">Buscar en Elixir</button>
     </div>
+    <button id="buscarElixir" class="btn btn-secondary" style="width:100%; margin-top:8px;">Buscar en Elixir Cuentas</button>
 
     <div id="resultados">
       <div class="msg">Abre un chat y pulsa <b>Buscar cuentas</b>.</div>
@@ -329,12 +354,13 @@
 
     <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
 
-    <div class="field" style="display:flex;align-items:center;justify-content:space-between;">
-      <label for="cfgOverlayEnabled" style="margin:0;">⚡ Panel flotante en WhatsApp</label>
-      <input type="checkbox" id="cfgOverlayEnabled" style="width:auto;" />
-    </div>
     <div class="field">
-      <div class="hint">Muestra el nombre y los D del cliente sobre el chat. La ✕ del panel solo lo minimiza: aquí es donde se apaga.</div>
+      <label for="cfgOverlayForma">Forma del flotante</label>
+      <select id="cfgOverlayForma">
+        <option value="burbuja">Burbuja redonda</option>
+        <option value="barra">Barra alargada</option>
+      </select>
+      <div class="hint">La barra junta el ⚡, el nombre y los D en una sola pieza: estorba menos si lo aparcas sobre el nombre del contacto. Encender y apagar el flotante se hace desde la pantalla principal.</div>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">

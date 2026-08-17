@@ -189,9 +189,12 @@
       .badge.active, .badge.ok { background:#e7f7ee; color:#137a45; }
       .badge.bad { background:#fdeaea; color:#b42318; }
       .badge.prov { background:#ede9fe; color:#6d28d9; text-transform:none; }
-      .copy { width:100%; background:#fff; color:#7c3aed; border:1px solid #ddd4ff; border-radius:8px; font-weight:600; font-size:12.5px; padding:7px; cursor:pointer; }
-      .copy:hover { background:#f3f0ff; }
-      .copy.done { background:#e7f7ee; color:#137a45; border-color:#bfe9cf; }
+      .copy, .renov { width:100%; background:#fff; color:#7c3aed; border:1px solid #ddd4ff; border-radius:8px; font-weight:600; font-size:12.5px; padding:7px; cursor:pointer; }
+      .copy:hover, .renov:hover { background:#f3f0ff; }
+      .copy.done, .renov.done { background:#e7f7ee; color:#137a45; border-color:#bfe9cf; }
+      .renov { margin-top:6px; }
+      .aviso.caida { background:#fdeaea; color:#991b1b; border:1px solid #f6c9c9; }
+      .aviso.plazo { background:#fffbeb; color:#78350f; border:1px solid #fde68a; }
       .pedir { width:100%; margin-top:6px; background:linear-gradient(135deg,#635bff,#8b5cf6); color:#fff; border:none; border-radius:8px; font-weight:600; font-size:12.5px; padding:7px; cursor:pointer; }
       .pedir:hover { filter:brightness(1.05); }
       .pedir:disabled { opacity:.7; cursor:default; }
@@ -945,10 +948,14 @@
     }
 
     const ord = accounts.slice().sort((a, b) => (b.is_disney ? 1 : 0) - (a.is_disney ? 1 : 0));
-    const cards = ord.map((acc) => {
+    const cards = ord.map((acc, i) => {
       const disney = !!acc.is_disney;
       const diasNeg = typeof acc.days_remaining === "number" && acc.days_remaining < 0;
       const active = acc.status === "active";
+      // La cuenta madre caída manda sobre todo lo demás: lo que el cliente está
+      // escribiendo es un reclamo de garantía, no una renovación, y contestarle
+      // con el mensaje de renovación sería meter la pata.
+      const caida = acc.provider_account_status === "limbo" || acc.provider_account_status === "dead";
       return `
         <div class="card${disney ? " card-disney" : ""}">
           <div class="ctitle">${escapeHtml(acc.account_type_name || "Cuenta")}${disney ? '<span class="dbadge">DISNEY</span>' : ""}</div>
@@ -956,9 +963,14 @@
           <div class="meta">
             <span class="badge${active ? " active" : ""}">${escapeHtml(acc.status || "")}</span>
             <span class="badge ${diasNeg ? "bad" : "ok"}">${escapeHtml(textoDias(acc.days_remaining))}</span>
+            ${typeof acc.price === "number" ? `<span class="badge">${escapeHtml(moneda(acc.price))}</span>` : ""}
             ${nombreProveedor(acc) ? `<span class="badge prov">${escapeHtml(nombreProveedor(acc))}</span>` : ""}
+            ${acc.combo_group_id ? `<span class="badge prov" title="Va en combo: no renovar una sola">combo</span>` : ""}
           </div>
+          ${caida ? `<div class="aviso caida">⚠️ La cuenta madre está caída: si reclama, es <b>garantía</b>.</div>` : ""}
+          ${acc.payment_deadline ? `<div class="aviso plazo">⏳ Plazo de pago hasta el <b>${escapeHtml(acc.payment_deadline)}</b>.</div>` : ""}
           <button class="copy" data-email="${escapeHtml(acc.provider_email || "")}">Copiar correo</button>
+          ${acc.renewal_message ? `<button class="renov" data-idx="${i}">💬 Copiar mensaje de renovación</button>` : ""}
           ${botonCodigo(acc, escapeHtml(acc.provider_email || ""))}
           <div class="codigo-slot"></div>
         </div>`;
@@ -978,6 +990,20 @@
         const orig = btn.textContent;
         btn.textContent = "¡Copiado!"; btn.classList.add("done");
         setTimeout(() => { btn.textContent = orig; btn.classList.remove("done"); }, 1200);
+      });
+    });
+
+    // El mensaje de renovación se coge de los datos, no de un atributo: lleva
+    // saltos de línea, asteriscos y comillas, y meterlo en el HTML sería pedir
+    // que un correo con un carácter raro rompa la tarjeta.
+    shadow.querySelectorAll(".renov").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const acc = ord[Number(btn.getAttribute("data-idx"))];
+        if (!acc || !acc.renewal_message) return;
+        await copiar(acc.renewal_message);
+        const orig = btn.textContent;
+        btn.textContent = "¡Copiado! Pégalo en el chat"; btn.classList.add("done");
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove("done"); }, 1600);
       });
     });
 

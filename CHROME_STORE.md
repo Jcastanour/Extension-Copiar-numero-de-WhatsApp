@@ -1,9 +1,40 @@
-# Publicación en Chrome Web Store — v1.4.0
+# Publicación en Chrome Web Store — v1.5.0
 
 Documento de apoyo para subir la versión y completar el formulario de la tienda
 (justificaciones de permisos, divulgación de datos y política de privacidad).
 
-> ⚠️ **La v1.4.0 SÍ añade un permiso de host nuevo**: `https://codigos.elixircuentas.com/*`.
+> ⚠️ **Antes de empacar la v1.5.0: quitar `http://localhost:8000/*` del manifest.**
+>
+> Ese host está en el repo para poder probar contra el backend local sin tocar nada,
+> pero no pinta nada en el paquete que se sube: sería un permiso de host más que
+> declarar y justificar, sobre un origen HTTP en claro, y eso es justo la clase de
+> cosa que alarga una revisión sin darle nada a quien instala la extensión.
+>
+> ```bash
+> # desde la raíz del repo, antes de crear el zip
+> python3 - <<'PY'
+> import json
+> m = json.load(open("manifest.json"))
+> m["host_permissions"] = [h for h in m["host_permissions"] if "localhost" not in h]
+> json.dump(m, open("manifest.json", "w"), indent=2, ensure_ascii=False)
+> PY
+> ```
+>
+> Y devolverlo al terminar (`git checkout manifest.json`), que si no la próxima
+> sesión de desarrollo local responde con un error de red sin explicación.
+
+> **Qué trae la v1.5.0** (sin permisos nuevos respecto a la 1.4.0, una vez quitado
+> localhost, así que la declaración de datos **no cambia**):
+>
+> - Estando parado en un chat se ve, sin abrir nada, el nombre del cliente y su
+>   secuencia D. Es lo que sustituye al contacto de Google Contacts, que ya no se
+>   puede guardar en los chats que solo exponen `@usuario`.
+> - Al pasar el ratón por encima aparece la ficha de esa persona.
+> - La ✕ del panel **minimiza**; el flotante se apaga desde Ajustes.
+> - El panel trae el mensaje de renovación listo para copiar y avisa cuando la
+>   cuenta madre se ha caído.
+
+> ⚠️ **La v1.4.0 SÍ añadió un permiso de host nuevo**: `https://codigos.elixircuentas.com/*`.
 > Es la primera versión desde la 1.1.0 que toca permisos, así que la revisión puede
 > tardar más de lo habitual. Los 5 permisos de API siguen siendo los mismos.
 >
@@ -19,8 +50,9 @@ Documento de apoyo para subir la versión y completar el formulario de la tienda
 
 ## 1. Build
 
-- Archivo a subir: `dist/copiar-numero-whatsapp-1.4.0.zip` (manifest.json en la raíz).
-- Versión: `1.4.0`.
+- Archivo a subir: `dist/copiar-numero-whatsapp-1.5.0.zip` (manifest.json en la raíz).
+- Versión: `1.5.0`.
+- Comprobar que `host_permissions` **no** lleva `localhost` (ver aviso de arriba).
 
 ## 2. Propósito único (Single purpose)
 
@@ -44,7 +76,7 @@ proveedores en Telegram.
 
 | Dominio | Uso |
 |---|---|
-| `*://web.whatsapp.com/*` | Leer el número, el nombre y el nombre de usuario visibles del chat y mostrar el panel overlay. |
+| `*://web.whatsapp.com/*` | Leer el número, el nombre y el nombre de usuario visibles del chat, y mostrar sobre él el panel y la etiqueta con los datos del cliente. |
 | `*://web.telegram.org/*` | Automatizar la solicitud de códigos a los bots de los proveedores. |
 | `https://elixircuentas.com/*` | Consultar la API de cuentas (`/api/extension/lookup`). |
 | `https://codigos.elixircuentas.com/*` | Consultar el servicio propio que extrae del buzón del negocio el código de verificación de Netflix (`/api/code`). |

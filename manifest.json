@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Copiar número de WhatsApp",
-  "version": "1.4.0",
-  "description": "Una extensión que copia automáticamente el número de teléfono de WhatsApp Web.",
+  "version": "1.5.0",
+  "description": "Muestra sobre el chat de WhatsApp quién es el cliente, sus días de cobro y sus cuentas de Elixir.",
   "permissions": ["activeTab", "scripting", "clipboardWrite", "storage", "tabs"],
   "action": {
     "default_icon": "Logo.png",
@@ -33,7 +33,8 @@
     "*://web.telegram.org/*",
     "https://elixircuentas-test.fly.dev/*",
     "https://elixircuentas.com/*",
-    "https://codigos.elixircuentas.com/*"
+    "https://codigos.elixircuentas.com/*",
+    "http://localhost:8000/*"
   ],
   "commands": {
     "_execute_action": {

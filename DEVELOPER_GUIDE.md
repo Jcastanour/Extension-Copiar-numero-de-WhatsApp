@@ -113,33 +113,77 @@ dos veces sin recargar.
 
 ## 🪟 4. Estados del panel flotante (y por qué importa)
 
-`overlay.js` tiene tres estados, persistidos en `chrome.storage.local` bajo `overlayState`:
+Desde la v1.5.0 hay **dos ejes independientes**, y esa separación es deliberada:
 
-| Estado | Qué se ve |
+| Clave en `chrome.storage.local` | Qué significa |
 |---|---|
-| `bubble` | Solo la burbuja ⚡ (por defecto) |
-| `panel` | El panel abierto; al entrar dispara el lookup del chat |
-| `hidden` | Nada |
+| `overlayState` | Dónde estoy: `bubble` (por defecto) o `panel` |
+| `overlayEnabled` | Si el flotante existe. Solo se apaga desde Ajustes del popup |
 
-**Cuidado al tocar esto.** `hidden` se persiste, así que sobrevive a recargar la página. Hasta la
-v1.3.0 la única forma de salir de ese estado era el atajo `Ctrl/Cmd+Shift+Space`, que no está
-escrito en ninguna parte de la interfaz: si el navegador se quedaba con esa combinación, el panel
-quedaba **inaccesible para siempre** en esa instalación. Pasó de verdad, en Edge.
+En `bubble` se ven la burbuja ⚡ y el **chip** con el nombre y los D del cliente; en `panel`, el
+panel abierto (el chip sobra, porque su información está dentro y con más detalle).
 
-Ahora hay tres salidas y conviene mantener las tres:
+**Por qué se separaron.** Antes había un tercer estado, `hidden`, al que llevaba la ✕ del panel. Se
+persistía, así que sobrevivía a recargar: quien pulsaba la ✕ sin conocer el atajo
+`Ctrl/Cmd+Shift+Space` —que no está escrito en ninguna parte de la interfaz— se quedaba sin panel
+**para siempre** en esa instalación. Pasó de verdad, en Edge. Cerrar una cosa y desinstalarla no
+pueden ser el mismo botón.
 
-1. El botón `◱` del popup escribe `overlayState: "bubble"`.
-2. `chrome.storage.onChanged` en `overlay.js` escucha `overlayState` y aplica el cambio **en vivo**.
-   Ojo: ahí se llama a `aplicarEstadoUI()` y no a `setState()`, para no volver a escribir en storage
-   y provocar un bucle de eventos.
-3. Al pulsar ✕ sale un aviso diciendo cómo volver. El toast es independiente del panel y del
-   launcher, por eso se ve aunque ambos estén ocultos.
+Ahora la ✕ minimiza y el apagado real es una decisión explícita, que se deshace donde se tomó.
+`hidden` ya no existe, pero sigue habiendo dos sitios que lo tratan y **no hay que quitarlos**:
+
+- El init lo migra a `{overlayEnabled: false, overlayState: "bubble"}` y lo reescribe en storage.
+  Sin eso, quien pulsó la ✕ en una versión vieja seguiría sin ver nada tras actualizar.
+- El listener de `onChanged` lo lee como `bubble`: mientras convivan las dos versiones, una pestaña
+  con la antigua todavía puede escribirlo.
+
+Salidas que conviene mantener:
+
+1. El checkbox de Ajustes (patrón calcado de `cfgTgEnabled`, con el default seguro `x !== false`).
+2. El botón `◱` del popup, que además fuerza `overlayEnabled: true` — es lo primero que prueba
+   quien no encuentra el panel.
+3. `chrome.storage.onChanged` aplica ambas claves **en vivo**, sin recargar WhatsApp. Ojo: ahí se
+   llama a `aplicarEstadoUI()` y no a `setState()`, para no volver a escribir en storage y provocar
+   un bucle de eventos.
 
 Regla general: **ninguna acción de un clic debe poder dejar la extensión sin una salida visible.**
 
 ---
 
-## ⌨️ 5. Atajos
+## 🔎 5. El chip, la ficha y por qué la búsqueda corre siempre
+
+El chip es el sustituto del nombre del contacto de Google Contacts, que es donde vivían el nombre
+real del cliente y su secuencia D hasta que WhatsApp empezó a esconder el teléfono. Para que sirva
+tiene que estar al día sin que nadie abra nada, así que `schedule()` **ya no** sale temprano cuando
+el panel está cerrado. Lo que sostiene el coste:
+
+- Debounce de 350 ms con `maxWait` 1500 ms.
+- `evaluarChat()` compara por `firmaChat()` (solo el título del chat, no el subtítulo de presencia)
+  y corta antes de tocar la red en casi todas las mutaciones.
+- Nada con la pestaña en segundo plano; `visibilitychange` re-evalúa al volver.
+- Caché por conversación: 30 entradas, TTL 5 min.
+
+Tres detalles que parecen de adorno y no lo son:
+
+- **La búsqueda automática usa `rapido: true`**, que impide abrir el panel de contacto de WhatsApp
+  y sacar el modal. Ocurre sola en cada chat: si tocara la interfaz sería insoportable. Solo el
+  botón 🔍, que es explícito, puede hacerlo.
+- **Toda búsqueda termina en `finBusqueda()`**, que re-evalúa. Si el chat cambió a media búsqueda,
+  el guard de `buscando` bloqueó la segunda y sin esto el chat nuevo no se consultaría nunca.
+- **La ficha del hover no lleva correos ni contraseñas.** Se despliega sola con solo pasar el ratón
+  y puede quedar a la vista en una pantalla compartida. Eso vive en el panel, tras un clic.
+
+`normalizarLookup()` traduce la respuesta del backend en un solo sitio y **ningún campo nuevo es
+obligatorio**: producción puede ir por detrás de test, y la extensión tiene que funcionar contra
+ambos contratos. Lo que falte, no se pinta.
+
+Los D **no se derivan en la extensión**. La convención (D01–D03 con cero, D4+ sin él, dedupe, y que
+D31 no existe) vive en el backend, y duplicarla aquí sería garantizar que un día diverja de lo que
+ve el operador en la web.
+
+---
+
+## ⌨️ 6. Atajos
 
 Chrome solo permite **4 comandos con tecla sugerida** por extensión, y el manifest
 ya los tiene todos (`_execute_action` cuenta). Por eso:
@@ -152,7 +196,7 @@ ya los tiene todos (`_execute_action` cuenta). Por eso:
 
 ---
 
-## 🧪 6. Probar sin recargar nada
+## 🧪 7. Probar sin recargar nada
 
 En las DevTools de WhatsApp Web, cambia el contexto de la consola de `top` a
 **"Copiar número de WhatsApp"** y evalúa:
@@ -160,8 +204,25 @@ En las DevTools de WhatsApp Web, cambia el contexto de la consola de `top` a
 ```js
 __elixirUtils.VERSION
 await __elixirUtils.obtenerIdentidad({ permitirPanel: false })
+await __elixirUtils.obtenerIdentidad({ rapido: true })   // lo que usa el chip
 __elixirUtils.leerPanelContacto()          // con el panel de contacto abierto
 __elixirUtils.normalizarNumero("302 422 0918", { asumirPais: true })
 ```
 
 Es la forma más rápida de iterar los selectores cuando WhatsApp vuelva a cambiar.
+
+### Contra el backend local
+
+En Ajustes, `BASE_URL` = `http://localhost:8000` (ya está en `host_permissions`; sin esa entrada
+el `fetch` del service worker se bloquea sin decir por qué) y la `EXTENSION_API_KEY` del `.env` del
+backend. Si esa variable está vacía en el servidor, **todo responde 401** y parece que el endpoint
+está roto.
+
+### Sin abrir Chrome
+
+`overlay.js` arranca en jsdom con un WhatsApp de mentira, lo que caza errores de arranque, TDZ y
+typos en segundos. Hace falta stubear `ResizeObserver`, `setPointerCapture`/`releasePointerCapture`
+y `chrome.*`, y **definir `navigator.clipboard` desde dentro de la ventana** (`window.eval`): el
+`navigator` que ve el código evaluado no es el mismo objeto que `window.navigator` visto desde Node.
+Guardando respuestas reales del backend en un `.json` se prueban de golpe el contrato nuevo, el
+viejo de producción, la persona sin cuentas activas y el número desconocido.

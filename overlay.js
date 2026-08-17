@@ -30,6 +30,14 @@
     return `Venció hace ${Math.abs(d)}d`;
   }
 
+  // close_reason viene del backend en su forma cruda; aquí se traduce a lo que
+  // diría un compañero.
+  const MOTIVO_CIERRE = {
+    no_renew: "no renovó",
+    guarantee: "garantía",
+    manual: "cierre manual",
+  };
+
   // ----- Shadow DOM / UI -----
   const host = document.createElement("div");
   host.id = "elixir-overlay-host";
@@ -88,6 +96,12 @@
 
       .msg { color:#6b7280; text-align:center; padding:12px; font-size:12.5px; }
       .msg.error { color:#b42318; }
+      .tenue { color:#9ca3af; }
+      .aviso { border-radius:10px; padding:10px; font-size:12.5px; line-height:1.45; margin-bottom:9px; }
+      .aviso.limpieza { background:#fff7ed; color:#7c2d12; border:1px solid #fed7aa; }
+      .cerradas { font-size:12px; color:#6b7280; }
+      .cerradas b { color:#4b5563; }
+      .cerradas ul { margin:4px 0 0; padding-left:18px; }
       .num { font-size:11.5px; color:#6b7280; margin:0 2px 8px; }
       .num b { color:#7c3aed; }
 
@@ -291,7 +305,82 @@
     return acc.provider || acc.provider_name || acc.proveedor || "";
   }
   let buscando = false;         // evita búsquedas concurrentes (re-entradas del observer)
-  let firmaCargada = null;      // firma del chat cuyas cuentas están renderizadas (cache)
+  let firmaActual = null;       // firma del chat abierto AHORA (lo que queremos mostrar)
+  let firmaCargada = null;      // firma del chat al que corresponde datosChat
+  let datosChat = null;         // lo que sabemos del chat actual (ver ponerDatos)
+
+  // ----- Normalización de la respuesta del backend -----
+  //
+  // El endpoint fue creciendo y sigue creciendo. Traducirlo aquí, en un solo
+  // sitio, permite que el resto del archivo no sepa nada del contrato: si mañana
+  // cambia un nombre de campo, se toca esta función y ya.
+  //
+  // Y sobre todo: NINGÚN campo nuevo es obligatorio. Producción todavía sirve el
+  // contrato viejo (solo test está desplegado), y la extensión tiene que seguir
+  // funcionando contra ambos. Lo que falte simplemente no se pinta.
+  function normalizarLookup(data, termino) {
+    const d = data || {};
+    const accounts = Array.isArray(d.accounts) ? d.accounts : [];
+
+    // days_remaining puede venir null (cuenta sin vencimiento): esos no cuentan
+    // para el "más urgente" ni deben colarse como un 0.
+    const dias = accounts
+      .map((a) => a.days_remaining)
+      .filter((n) => typeof n === "number");
+
+    return {
+      estado: "ok",
+      termino,
+      // Backend viejo: no manda `found`, pero tener cuentas ya implica que existe.
+      found: typeof d.found === "boolean" ? d.found : accounts.length > 0,
+      // El nombre del cliente es el dato que sustituye al contacto de Google.
+      nombre: d.client_name || (accounts[0] && accounts[0].profile_name) || "",
+      // Los D NO se derivan aquí: la convención (D01–D03 con cero, D4+ sin él,
+      // y que D31 no existe) vive en el backend. Si no viene, no se muestra.
+      dStr: typeof d.contact_format_string === "string" ? d.contact_format_string : "",
+      activas: typeof d.active_count === "number" ? d.active_count : accounts.length,
+      cerradas: typeof d.closed_count === "number" ? d.closed_count : null,
+      // Derivado en local aunque el backend lo mande: sale gratis y así el color
+      // de urgencia funciona igual contra el contrato viejo.
+      minDias: dias.length ? Math.min.apply(null, dias) : null,
+      mensual: typeof d.total_monthly === "number" ? d.total_monthly : null,
+      consent: d.consent || null,
+      garantia: d.has_pending_guarantee === true,
+      notas: Array.isArray(d.important_notes) ? d.important_notes : [],
+      meses: typeof d.tenure_months === "number" ? d.tenure_months : null,
+      renovaciones: typeof d.renewal_count === "number" ? d.renewal_count : null,
+      cerradasRecientes: Array.isArray(d.closed_recent) ? d.closed_recent : [],
+      accounts,
+    };
+  }
+
+  // ----- Caché por chat -----
+  //
+  // Antes solo se recordaba el último chat consultado. Ahora la búsqueda salta en
+  // CADA chat que se abre, así que ir y volver entre dos conversaciones —lo más
+  // normal del mundo— sería un request por visita. Con esto, volver es instantáneo.
+  //
+  // El TTL existe porque los días restantes y los estados cambian mientras se
+  // trabaja; el tope, para que una jornada larga no acumule cientos de fichas.
+  const CACHE_TTL_MS = 5 * 60 * 1000;
+  const CACHE_MAX = 30;
+  const cacheChats = new Map();
+
+  function leerCache(firma) {
+    const reg = cacheChats.get(firma);
+    if (!reg) return null;
+    if (Date.now() - reg.ts > CACHE_TTL_MS) { cacheChats.delete(firma); return null; }
+    return reg.datos;
+  }
+
+  function guardarCache(firma, datos) {
+    if (!firma) return;
+    // Map itera en orden de inserción: la primera clave es la más vieja.
+    if (cacheChats.size >= CACHE_MAX && !cacheChats.has(firma)) {
+      cacheChats.delete(cacheChats.keys().next().value);
+    }
+    cacheChats.set(firma, { datos, ts: Date.now() });
+  }
 
   function aplicarEstadoUI() {
     elLauncher.hidden = !overlayEnabled || state !== "bubble";
@@ -307,8 +396,12 @@
     aplicarEstadoUI();
     guardarEstado();
     if (state === "panel") {
+      // pintarPanel primero: el panel estaba oculto y por eso no se repintaba,
+      // así que al abrirlo hay que volcar lo que ya sabemos. evaluarChat() solo
+      // añade la búsqueda si el chat cambió mientras estaba cerrado.
+      pintarPanel();
       posicionarPanel();
-      evaluarChat(); // muestra cache si no cambió el chat; si cambió, busca
+      evaluarChat();
     }
   }
 
@@ -399,33 +492,129 @@
     aviso: (texto) => mostrarAviso(texto),
   };
 
-  // Búsqueda completa: abre el panel de contacto si hace falta, encuentra el
-  // número y consulta las cuentas. Sin número → vuelve a burbuja + aviso.
+  // Busca la identidad del chat y consulta sus cuentas.
+  //
+  // auto = lo disparó un cambio de chat, no el operador. En ese caso NO puede
+  // tocar la interfaz de WhatsApp (abrir el panel de contacto, sacar el modal):
+  // ocurre solo, a cada chat, y sería insoportable. Con el botón 🔍 sí, porque
+  // ahí el operador está pidiendo explícitamente que se busque.
+  //
   // `buscando` se mantiene hasta que lookup() responde (lo libera su callback).
-  async function buscarAhora() {
+  async function buscarAhora(opts) {
+    const auto = !!(opts && opts.auto);
     if (buscando) return;
     buscando = true;
-    setMsg("Buscando…");
-    // permitirManual: es una acción explícita del usuario (botón 🔍), así que
-    // aquí sí tiene sentido preguntarle el número si no aparece por ningún lado.
+    const firmaAlEmpezar = firmaActual;
+    ponerDatos({ estado: "buscando" });
+
     const id = await utils.obtenerIdentidad({
-      permitirPanel: true, permitirManual: true, motivo: "buscar cuentas",
+      rapido: auto,
+      permitirPanel: !auto,
+      permitirManual: !auto,
+      motivo: "buscar cuentas",
     });
-    if (state !== "panel") { buscando = false; return; } // se minimizó/cerró mientras buscaba
-    if (id.fuente === "grupo") {
-      buscando = false; setState("bubble"); mostrarAviso("Es un chat de grupo"); return;
-    }
+
+    // Cambió de chat mientras se resolvía la identidad: lo que venga ya no es de
+    // este chat. Se descarta sin pintar nada — el cambio ya programó su propia
+    // búsqueda.
+    if (firmaChat() !== firmaAlEmpezar) { buscando = false; return; }
+
+    if (id.fuente === "grupo") { ponerDatos({ estado: "grupo" }); finBusqueda(); return; }
     if (!id.numero) {
-      buscando = false; setState("bubble"); mostrarAviso("Sin número en este chat"); return;
+      ponerDatos({ estado: "sin-numero", username: id.username || null });
+      finBusqueda();
+      return;
     }
     lookup(id.numero);
+  }
+
+  // Cierra una búsqueda y re-evalúa. Si el chat cambió mientras se buscaba, esa
+  // búsqueda quedó bloqueada por el guard de `buscando` y hay que lanzarla ahora;
+  // si no cambió, evaluarChat() sale en la primera línea. Sin esto, cambiar de
+  // chat a media búsqueda dejaba el chat nuevo sin consultar nunca.
+  function finBusqueda() {
+    buscando = false;
+    evaluarChat();
+  }
+
+  // Guarda lo que sabemos del chat y lo pinta. Todos los caminos terminan aquí:
+  // es el único sitio que escribe datosChat.
+  //
+  //   ok | buscando | sin-chat | grupo | sin-numero | error
+  //
+  function ponerDatos(d) {
+    datosChat = d;
+    // "buscando" es un estado de paso: marcar el chat como cargado con él haría
+    // que evaluarChat() lo diera por resuelto y nunca completara la búsqueda.
+    if (d && d.estado !== "buscando") firmaCargada = firmaActual;
+    pintarPanel();
   }
 
   // ----- Render -----
   function setBody(html) { elBody.innerHTML = html; }
   function setMsg(texto, esError) { setBody(`<div class="msg${esError ? " error" : ""}">${texto}</div>`); }
 
-  function renderCuentas(numero, accounts) {
+  // Pinta el panel según lo que sepamos del chat. Antes, "sin cuentas" y los
+  // errores minimizaban el panel y sacaban un toast; ahora se quedan dentro del
+  // panel. Cerrarle al operador lo que acaba de abrir es hostil, y con la
+  // búsqueda corriendo en cada chat un backend caído habría sacado un toast por
+  // cada conversación que abriera.
+  function pintarPanel() {
+    if (elPanel.hidden) return;
+    const d = datosChat;
+    if (!d) { setMsg("Abre un chat para ver las cuentas."); return; }
+
+    if (d.estado === "buscando") { setMsg("Buscando…"); return; }
+    if (d.estado === "sin-chat") { setMsg("Abre un chat para ver las cuentas."); return; }
+    if (d.estado === "grupo") { setMsg("Es un chat de grupo: no tiene un número único."); return; }
+    if (d.estado === "error") { setMsg(escapeHtml(d.mensaje || "Error al consultar."), true); return; }
+
+    if (d.estado === "sin-numero") {
+      const quien = d.username ? ` de <b>${escapeHtml(d.username)}</b>` : "";
+      setBody(
+        `<div class="msg">WhatsApp no muestra el número${quien} en este chat.</div>` +
+        `<button class="pedir" id="btnTeclear">✏️ Escribir el número</button>`
+      );
+      // Reintento explícito: al no ser automático, sí puede abrir el panel de
+      // contacto y, si aun así no aparece, pedirlo por el modal (y recordarlo).
+      const b = shadow.getElementById("btnTeclear");
+      if (b) b.addEventListener("click", () => buscarAhora({ auto: false }));
+      return;
+    }
+
+    renderCuentas(d);
+  }
+
+  // Lo último que se le cerró. Responde al "¿y mi Max?" sin abrir la app: esa
+  // cuenta ya no existe, y aquí está por qué.
+  function cerradasHtml(d) {
+    if (!d.cerradasRecientes.length) return "";
+    const filas = d.cerradasRecientes.map((r) =>
+      `<li>${escapeHtml(r.account_type_name || "Cuenta")}` +
+      (r.close_reason ? ` <span class="tenue">(${escapeHtml(MOTIVO_CIERRE[r.close_reason] || r.close_reason)})</span>` : "") +
+      `</li>`
+    ).join("");
+    return `<div class="cerradas"><b>Últimas cerradas</b><ul>${filas}</ul></div>`;
+  }
+
+  function renderCuentas(d) {
+    const accounts = d.accounts;
+
+    // Persona conocida sin nada activo. Antes esto era indistinguible de un
+    // número desconocido y el panel se cerraba con un "sin cuentas"; en realidad
+    // es una instrucción de trabajo, y de las importantes.
+    if (!accounts.length) {
+      const quien = d.nombre ? `<b>${escapeHtml(d.nombre)}</b>` : "Este número";
+      setBody(
+        d.found
+          ? `<div class="aviso limpieza">🧹 ${quien} no tiene cuentas activas.<br>` +
+            `<b>Limpieza total:</b> quitar la etiqueta <i>pagos</i> y toda D del nombre del contacto.</div>` +
+            cerradasHtml(d)
+          : `<div class="msg">Sin cuentas para este número.</div>`
+      );
+      return;
+    }
+
     const ord = accounts.slice().sort((a, b) => (b.is_disney ? 1 : 0) - (a.is_disney ? 1 : 0));
     const cards = ord.map((acc) => {
       const disney = !!acc.is_disney;
@@ -445,7 +634,12 @@
           <div class="codigo-slot"></div>
         </div>`;
     }).join("");
-    setBody(`<div class="num">📱 <b>${escapeHtml(numero)}</b> · ${ord.length} cuenta(s)</div>` + cards);
+    const titulo = d.nombre ? `${escapeHtml(d.nombre)} · ` : "";
+    setBody(
+      `<div class="num">📱 ${titulo}<b>${escapeHtml(d.termino)}</b> · ${ord.length} cuenta(s)</div>` +
+      (d.dStr ? `<div class="num">🗓️ <b>${escapeHtml(d.dStr)}</b></div>` : "") +
+      cards
+    );
 
     shadow.querySelectorAll(".copy").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -562,24 +756,28 @@
   // y es el backend quien decide cómo buscar.
   function lookup(termino) {
     const id = ++reqId;
-    setMsg("Buscando…");
+    const firmaAlEmpezar = firmaActual;
     chrome.runtime.sendMessage({ type: "elixir-lookup", termino }, (resp) => {
-      buscando = false;
-      if (id !== reqId) return; // respuesta vieja (cambió el chat): ignorar
-      if (resp && resp.aborted) return;
-      if (chrome.runtime.lastError) { setState("bubble"); mostrarAviso("No se pudo consultar (recarga la extensión)."); return; }
-      if (!resp) { setState("bubble"); mostrarAviso("Sin respuesta del servicio."); return; }
-      if (!resp.ok) { setState("bubble"); mostrarAviso(resp.error || "Error al consultar."); return; }
-      const data = resp.data || {};
-      if (!data.count || !Array.isArray(data.accounts) || data.accounts.length === 0) {
-        setState("bubble"); mostrarAviso("Sin cuentas para este número");
-        return;
-      }
-      firmaCargada = firmaChat(); // cache: reabrir el mismo chat no re-busca
-      renderCuentas(termino, data.accounts);
+      if (id !== reqId) { buscando = false; return; }   // respuesta vieja: ignorar
+      if (resp && resp.aborted) { buscando = false; return; }
+
+      const fallo = chrome.runtime.lastError
+        ? "No se pudo consultar (recarga la extensión)."
+        : !resp ? "Sin respuesta del servicio."
+        : !resp.ok ? (resp.error || "Error al consultar.")
+        : null;
+
+      // Un fallo NO se guarda en caché: el backend puede estar reiniciándose y el
+      // siguiente intento tiene que volver a preguntar.
+      if (fallo) { ponerDatos({ estado: "error", mensaje: fallo }); finBusqueda(); return; }
+
+      const datos = normalizarLookup(resp.data, termino);
+      guardarCache(firmaAlEmpezar, datos);
+      ponerDatos(datos);
       // Solo si el panel sigue abierto: si se minimizó mientras la respuesta
       // venía en vuelo, no hay que medir/posicionar un panel oculto.
       if (state === "panel") posicionarPanel();
+      finBusqueda();
     });
   }
 
@@ -596,27 +794,53 @@
   }
 
   function evaluarChat() {
-    if (!overlayEnabled || state !== "panel" || buscando) return;
+    if (!overlayEnabled) return;
+
     const firma = firmaChat();
-    if (!firma) { setState("bubble"); mostrarAviso("Abre un chat"); return; }
-    if (firma === firmaCargada) { posicionarPanel(); return; } // ya tenemos sus cuentas: cache
-    buscarAhora();
+    if (!firma) {
+      firmaActual = null;
+      if (datosChat && datosChat.estado === "sin-chat") return;
+      ponerDatos({ estado: "sin-chat" });
+      return;
+    }
+
+    firmaActual = firma;
+    if (firma === firmaCargada) {          // ya sabemos de este chat
+      if (state === "panel") posicionarPanel();
+      return;
+    }
+
+    const guardado = leerCache(firma);     // visitado hace poco: sin red
+    if (guardado) { ponerDatos(guardado); if (state === "panel") posicionarPanel(); return; }
+
+    if (buscando) return;                  // hay una en vuelo; finBusqueda re-evalúa
+    buscarAhora({ auto: true });
   }
 
   // debounce con maxWait para no morir bajo mutaciones constantes
   let timer = null, primerScheduled = 0;
   function schedule() {
-    // WhatsApp muta el DOM sin parar (presencia, animaciones, mensajes). Con el
-    // panel cerrado no hay nada que evaluar: salir aquí evita mantener un timer
-    // girando permanentemente en segundo plano — CPU regalada en equipos flojos.
-    // Al abrir el panel, setState ya llama a evaluarChat() directo: no se pierde nada.
-    if (state !== "panel") return;
+    // Antes esto salía cuando el panel estaba cerrado, para no gastar CPU. Ya no
+    // se puede: el chip tiene que estar al día SIEMPRE, que es justo la gracia de
+    // no tener que abrir nada. Lo que sostiene el coste son el debounce de abajo
+    // y la comparación por firma en evaluarChat(), que corta antes de tocar la red
+    // en la inmensa mayoría de las mutaciones.
+    if (!overlayEnabled) return;
+    // Pestaña en segundo plano: WhatsApp sigue mutando el DOM (mensajes que
+    // entran, presencia) pero no hay nadie mirando. Al volver, visibilitychange
+    // re-evalúa, así que no se pierde nada.
+    if (document.hidden) return;
+
     const ahora = performance.now();
     if (!timer) primerScheduled = ahora;
     if (timer) clearTimeout(timer);
     const espera = ahora - primerScheduled > 1500 ? 0 : 350;
     timer = setTimeout(() => { timer = null; evaluarChat(); }, espera);
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) schedule();
+  });
 
   const observer = new MutationObserver(schedule);
   observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -626,7 +850,13 @@
   // el interruptor de verdad vive en Ajustes del popup. Sin aviso, porque ya no
   // hay nada que explicar — la burbuja sigue ahí, a la vista.
   shadow.getElementById("btnClose").addEventListener("click", () => setState("bubble"));
-  shadow.getElementById("btnRefresh").addEventListener("click", () => { firmaCargada = null; buscarAhora(); }); // 🔍 fuerza re-búsqueda
+  // 🔍 fuerza re-búsqueda: invalida la caché de ESTE chat y busca de nuevo. Al ser
+  // una acción explícita, puede abrir el panel de contacto y pedir el número.
+  shadow.getElementById("btnRefresh").addEventListener("click", () => {
+    if (firmaActual) cacheChats.delete(firmaActual);
+    firmaCargada = null;
+    buscarAhora({ auto: false });
+  });
 
   // ----- Arrastre (burbuja y cabecera del panel) -----
   const DRAG_UMBRAL = 5;
@@ -752,7 +982,10 @@
   function arrancar() {
     aplicarPosBurbuja();
     aplicarEstadoUI();
-    if (state === "panel") { posicionarPanel(); evaluarChat(); }
+    if (state === "panel") posicionarPanel();
+    // Se evalúa siempre, no solo con el panel abierto: el chip tiene que salir
+    // solo al cargar la página, sin que nadie abra nada.
+    evaluarChat();
   }
 
   // ----- Init -----
@@ -820,7 +1053,9 @@
       if (changes.tgEnabled) tgEnabled = !!changes.tgEnabled.newValue;
       if (changes.tgBotKh && typeof changes.tgBotKh.newValue === "string") tgBotKh = changes.tgBotKh.newValue.trim().replace(/^@/, "") || tgBotKh;
       if (changes.tgBotWolf && typeof changes.tgBotWolf.newValue === "string") tgBotWolf = changes.tgBotWolf.newValue.trim().replace(/^@/, "") || tgBotWolf;
-      if (changes.tgEnabled || changes.tgBotKh || changes.tgBotWolf) { firmaCargada = null; evaluarChat(); }
+      // Los botones de código dependen de estos ajustes: hay que repintar. Los
+      // datos siguen siendo válidos, así que se repinta sin volver a consultar.
+      if (changes.tgEnabled || changes.tgBotKh || changes.tgBotWolf) pintarPanel();
     });
   } catch (e) {}
 })();

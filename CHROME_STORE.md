@@ -3,36 +3,27 @@
 Documento de apoyo para subir la versión y completar el formulario de la tienda
 (justificaciones de permisos, divulgación de datos y política de privacidad).
 
-> ⚠️ **Antes de empacar la v1.5.0: quitar `http://localhost:8000/*` del manifest.**
+> ✅ **La v1.5.0 NO añade permisos.** Mismos 5 permisos y mismos 5 hosts que la
+> 1.4.0, así que **la declaración de datos del formulario no cambia** y la revisión
+> debería ser rápida. Verificado comparando los dos zips.
 >
-> Ese host está en el repo para poder probar contra el backend local sin tocar nada,
-> pero no pinta nada en el paquete que se sube: sería un permiso de host más que
-> declarar y justificar, sobre un origen HTTP en claro, y eso es justo la clase de
-> cosa que alarga una revisión sin darle nada a quien instala la extensión.
->
-> ```bash
-> # desde la raíz del repo, antes de crear el zip
-> python3 - <<'PY'
-> import json
-> m = json.load(open("manifest.json"))
-> m["host_permissions"] = [h for h in m["host_permissions"] if "localhost" not in h]
-> json.dump(m, open("manifest.json", "w"), indent=2, ensure_ascii=False)
-> PY
-> ```
->
-> Y devolverlo al terminar (`git checkout manifest.json`), que si no la próxima
-> sesión de desarrollo local responde con un error de red sin explicación.
+> El manifest del repo lleva `http://localhost/*` para poder probar contra el
+> backend del propio equipo, pero **`empaquetar.sh` lo quita del zip** trabajando
+> sobre una copia. No hay que editar nada a mano ni acordarse de revertirlo.
 
-> **Qué trae la v1.5.0** (sin permisos nuevos respecto a la 1.4.0, una vez quitado
-> localhost, así que la declaración de datos **no cambia**):
+> **Qué trae la v1.5.0:**
 >
-> - Estando parado en un chat se ve, sin abrir nada, el nombre del cliente y su
->   secuencia D. Es lo que sustituye al contacto de Google Contacts, que ya no se
->   puede guardar en los chats que solo exponen `@usuario`.
-> - Al pasar el ratón por encima aparece la ficha de esa persona.
-> - La ✕ del panel **minimiza**; el flotante se apaga desde Ajustes.
-> - El panel trae el mensaje de renovación listo para copiar y avisa cuando la
->   cuenta madre se ha caído.
+> - El clic en el flotante resuelve el chat y muestra la ficha del cliente: nombre,
+>   secuencia D para Google Contacts, cuentas, correos y códigos.
+> - Al minimizar, el flotante conserva el nombre y los D a la vista; el hover
+>   despliega la ficha resumida.
+> - **Copiar datos** (correo + contraseña de un pegado) y **Copiar número**.
+> - La ✕ del panel **minimiza**; el flotante se apaga desde la pantalla principal
+>   del popup, y apagado no deja nada corriendo en WhatsApp.
+> - Forma del flotante configurable: burbuja o barra.
+
+<details>
+<summary><b>Historial: qué pasó en la v1.4.0</b> (ya publicada, se conserva por contexto)</summary>
 
 > ⚠️ **La v1.4.0 SÍ añadió un permiso de host nuevo**: `https://codigos.elixircuentas.com/*`.
 > Es la primera versión desde la 1.1.0 que toca permisos, así que la revisión puede
@@ -46,13 +37,19 @@ Documento de apoyo para subir la versión y completar el formulario de la tienda
 > **Dato nuevo que declarar**: se envía a ese servicio el **correo de la cuenta de
 > streaming** (dato del negocio, no del cliente final).
 
+</details>
+
 ---
 
 ## 1. Build
 
-- Archivo a subir: `dist/copiar-numero-whatsapp-1.5.0.zip` (manifest.json en la raíz).
-- Versión: `1.5.0`.
-- Comprobar que `host_permissions` **no** lleva `localhost` (ver aviso de arriba).
+```bash
+./empaquetar.sh
+```
+
+- Genera `dist/copiar-numero-whatsapp-<versión>.zip` con `manifest.json` en la raíz.
+- Comprueba solo el archivo antes de terminar y **falla** si `localhost` se coló.
+- No toca el `manifest.json` del repo: el desarrollo local sigue funcionando.
 
 ## 2. Propósito único (Single purpose)
 
@@ -93,6 +90,17 @@ proveedores en Telegram.
 
 Marcar en el Dashboard: recopila *Website content* y *Personal communications*
 (número telefónico), con transmisión cifrada al backend propio.
+
+> **Novedad de la v1.5.0 que conviene mirar antes de certificar.** El botón
+> *Copiar datos* copia al portapapeles el correo **y la contraseña** de la cuenta
+> del proveedor, que ahora llegan desde el backend propio.
+>
+> Son credenciales **del negocio**, no del usuario de la extensión ni de terceros:
+> viajan del servidor del propietario a sus propios trabajadores, y no se recogen
+> del navegador de nadie. Por eso la lectura razonable es que **no** activa la
+> categoría *Authentication information* del formulario, que trata sobre datos
+> recogidos **del usuario**. Aun así, la certificación la firmas tú: decídelo con
+> este dato delante en vez de heredar la declaración anterior sin mirar.
 
 ---
 
@@ -174,14 +182,20 @@ publicado en la ficha de la Chrome Web Store.
 
 ---
 
-## 6. Formulario de Privacidad — textos listos para pegar (v1.4.0)
+## 6. Formulario de Privacidad — textos listos para pegar
 
-> Frente a la v1.3.0 cambian el propósito único, la justificación del permiso de
-> host (hay un dominio nuevo) y el punto 6 de la política. Las casillas de uso de
-> datos y las tres certificaciones se quedan **igual**: no aparece ninguna categoría
-> de datos nueva. **Actualiza primero el Google Doc** de la
-> política con el texto de la sección 5 (el formulario certifica que coincide con la
-> política publicada).
+> **Para la v1.5.0 no hace falta tocar nada del formulario.** No hay permisos ni
+> hosts nuevos respecto a la 1.4.0 (verificado comparando los dos zips), así que
+> las justificaciones de abajo, las casillas de uso de datos y las tres
+> certificaciones siguen valiendo tal cual. Lee antes el aviso de la sección 4
+> sobre las contraseñas y decide si te cambia algo.
+>
+> El único texto que conviene refrescar es la **descripción de la tienda** (no el
+> formulario), porque la extensión hace bastante más que copiar un número.
+>
+> Si en algún momento sí cambian los permisos: **actualiza primero el Google Doc**
+> de la política con el texto de la sección 5, porque el formulario certifica que
+> coincide con la política publicada.
 
 **Descripción de un solo propósito**
 > Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Para las cuentas de Netflix obtiene el código de verificación consultando un servicio del propietario que lee el buzón del negocio, sin abrir Telegram. Incluye además una utilidad local que decodifica los códigos de recarga que el proveedor entrega codificados, sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
@@ -215,3 +229,32 @@ publicado en la ficha de la Chrome Web Store.
 **Certificaciones:** marcar las tres (no vender/transferir a terceros, no usar para fines ajenos, no usar para solvencia).
 
 **URL de política de privacidad:** la misma del Google Doc (tras actualizar su contenido con la sección 5).
+
+---
+
+## 7. Descripción de la tienda (v1.5.0) — para pegar en el listing
+
+**Nombre**
+> Elixir Cuentas — panel de clientes en WhatsApp
+
+**Descripción breve** (132 caracteres máx.)
+> Muestra sobre el chat de WhatsApp quién es el cliente, sus días de cobro y sus cuentas de streaming.
+
+**Descripción detallada**
+> Herramienta interna para el equipo de Elixir Cuentas.
+>
+> Estando en una conversación de WhatsApp Web, un clic en el botón flotante
+> identifica al contacto y muestra su ficha: nombre, la secuencia de días de cobro
+> que debe llevar su contacto de Google, sus cuentas activas con vencimiento y
+> precio, y avisos si tiene una garantía pendiente o notas importantes.
+>
+> Desde ahí se copia con un clic el número, el correo de la cuenta, o el correo y
+> la contraseña juntos para entrar de un solo pegado. Para las cuentas de Netflix
+> obtiene el código de verificación al instante; para el resto de proveedores lo
+> solicita a su bot de Telegram.
+>
+> El botón flotante se coloca donde convenga, se minimiza, y se apaga por completo
+> desde el popup si se prefiere trabajar solo con los atajos de teclado.
+>
+> Requiere una cuenta y una clave de API de Elixir Cuentas: sin ellas la extensión
+> no consulta nada.

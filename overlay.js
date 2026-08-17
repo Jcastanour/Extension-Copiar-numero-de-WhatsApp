@@ -30,12 +30,16 @@
     return `Venció hace ${Math.abs(d)}d`;
   }
 
-  // close_reason viene del backend en su forma cruda; aquí se traduce a lo que
-  // diría un compañero.
+  // close_reason viene crudo del backend. Las etiquetas son las mismas que usa la
+  // web en CLOSE_REASON_LABELS (ClientHistoryPage), para que el motivo se lea
+  // igual mire donde mire el operador. manual_delete es el que escribe la tabla
+  // de clientes al borrar a mano y no está en el mapa de la web, donde sale crudo.
   const MOTIVO_CIERRE = {
     no_renew: "no renovó",
+    closing: "cierre manual",
     guarantee: "garantía",
-    manual: "cierre manual",
+    manual: "manual",
+    manual_delete: "borrado a mano",
   };
 
   // ----- Shadow DOM / UI -----
@@ -62,6 +66,72 @@
         touch-action:none; user-select:none;
       }
       .launcher.dragging { cursor:grabbing; }
+      /* Chip: la identidad del cliente, siempre a la vista. Mismo truco de
+         posicionamiento que la burbuja (fixed en 0,0 + transform) para que
+         arrastrar no provoque layout. */
+      .chip {
+        position: fixed; left: 0; top: 0; will-change: transform;
+        display:flex; align-items:center; gap:7px;
+        max-width: 260px; padding:6px 10px; border-radius:11px;
+        background:#fff; color:#1e1b2e; cursor:grab;
+        border:1.5px solid #ddd4ff;
+        box-shadow: 0 4px 14px rgba(20,16,41,.18);
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+        font-size:12.5px; line-height:1.25;
+        touch-action:none; user-select:none;
+      }
+      .chip.dragging { cursor:grabbing; }
+      .chip .nom { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .chip .ds { font-family:ui-monospace,Menlo,monospace; font-weight:700; color:#6d28d9; white-space:nowrap; }
+      .chip .nota { color:#9ca3af; white-space:nowrap; }
+      /* Borde por urgencia: el color lo pone el vencimiento más próximo. */
+      .chip.urge { border-color:#fca5a5; }
+      .chip.pronto { border-color:#fcd34d; }
+      .chip.apagado { border-color:#e7e7ef; color:#6b7280; }
+      .chip .alerta { color:#dc2626; font-size:14px; line-height:1; }
+
+      /* Ficha al hover: quién es y cómo está, sin abrir nada. A propósito NO
+         lleva correos ni contraseñas — se despliega sola con solo pasar el ratón
+         y puede quedar a la vista en una pantalla compartida. Eso vive en el
+         panel, detrás de un clic deliberado. */
+      .ficha {
+        position: fixed; left: 0; top: 0; will-change: transform;
+        width: 290px; background:#fff; color:#1e1b2e;
+        border-radius:13px; overflow:hidden; padding:11px 12px;
+        box-shadow: 0 10px 30px rgba(20,16,41,.28);
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+        font-size:12.5px; line-height:1.4;
+      }
+      .ficha .cab { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+      .ficha .cab b { font-size:14px; }
+      .ficha .cab .anti { color:#9ca3af; font-size:11px; white-space:nowrap; }
+      .ficha .tel { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:#6b7280; margin-top:1px; }
+      .ficha .sep { border-top:1px solid #eceaf5; margin:8px 0; }
+      .ficha .dfila { display:flex; align-items:center; gap:8px; }
+      .ficha .dfila .ds {
+        flex:1; font-family:ui-monospace,Menlo,monospace; font-weight:700;
+        font-size:13.5px; color:#5b21b6; word-break:break-word;
+      }
+      .ficha .cop {
+        background:#f3f0ff; color:#6d28d9; border:1px solid #ddd4ff; border-radius:7px;
+        font-size:11px; font-weight:600; padding:3px 8px; cursor:pointer; white-space:nowrap;
+      }
+      .ficha .cop:hover { background:#ebe5ff; }
+      .ficha .resumen { color:#4b5563; margin-top:6px; }
+      .ficha .flag { border-radius:8px; padding:6px 8px; margin-top:6px; font-size:11.5px; }
+      .ficha .flag.roja { background:#fdeaea; color:#991b1b; }
+      .ficha .flag.ambar { background:#fff7ed; color:#7c2d12; }
+      .ficha .flag.gris { background:#f3f4f6; color:#374151; }
+      .ficha ul.cuentas { list-style:none; margin:8px 0 0; padding:0; }
+      .ficha ul.cuentas li {
+        display:flex; justify-content:space-between; gap:8px;
+        padding:3px 0; border-top:1px solid #f4f3fa;
+      }
+      .ficha ul.cuentas li span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .ficha .dias { font-variant-numeric:tabular-nums; white-space:nowrap; color:#6b7280; }
+      .ficha .dias.urge { color:#b42318; font-weight:600; }
+      .ficha .dias.pronto { color:#a16207; font-weight:600; }
+      .ficha .mas { color:#9ca3af; font-size:11px; margin-top:5px; }
       .panel {
         position: fixed; left: 0; top: 0; will-change: transform;
         width: 300px; max-height: 70vh; display:flex; flex-direction:column;
@@ -159,6 +229,8 @@
       .modal .cancelar { background:#fff; color:#6b7280; border:1px solid #e7e7ef; }
     </style>
     <button class="launcher" id="launcher" title="Mostrar cuentas Elixir" hidden>⚡</button>
+    <div class="chip" id="chip" title="Clic para ver las cuentas" hidden></div>
+    <div class="ficha" id="ficha" hidden></div>
     <div class="panel" id="panel" hidden>
       <div class="hdr">
         <span class="ttl">⚡ Cuentas</span>
@@ -190,6 +262,8 @@
 
   const elPanel = shadow.getElementById("panel");
   const elLauncher = shadow.getElementById("launcher");
+  const elChip = shadow.getElementById("chip");
+  const elFicha = shadow.getElementById("ficha");
   const elBody = shadow.getElementById("body");
   const elToast = shadow.getElementById("toast");
   const elModal = shadow.getElementById("modalFondo");
@@ -204,6 +278,7 @@
   let vw = window.innerWidth, vh = window.innerHeight; // viewport cacheado
   let panelW = 300, panelH = 0;                        // tamaño real del panel (ResizeObserver)
   let toastW = 0, toastH = 0;                          // tamaño del toast (medido al mostrarlo)
+  let chipW = 0, chipH = 0;                            // tamaño del chip (ResizeObserver)
 
   function clampPos(left, top) {
     const maxLeft = Math.max(0, vw - BW);
@@ -233,22 +308,44 @@
   }
   function posicionarToast() { colocarFlotante(elToast, toastW, toastH); }
 
-  // El contenido del panel cambia (mensajes, tarjetas): cuando su tamaño cambia,
-  // reposicionar con el tamaño que reporta el observer — cero lecturas de layout.
-  // Durante el arrastre no dispara (el tamaño no cambia), así que no molesta.
-  if (typeof ResizeObserver === "function") {
+  // El chip va PEGADO al lado de la burbuja, no encima ni debajo: es la etiqueta
+  // de la burbuja. Se coloca hacia el interior de la pantalla, igual que todo lo
+  // demás, para que en la esquina no se salga.
+  function posicionarChip() {
+    if (!chipH) { chipH = elChip.offsetHeight || 0; chipW = elChip.offsetWidth || 0; }
+    const alaIzquierda = pos.left + BW / 2 > vw / 2;
+    const x = alaIzquierda ? pos.left - GAP - chipW : pos.left + BW + GAP;
+    const y = pos.top + (BW - chipH) / 2;   // centrado con la burbuja
+    mover(elChip, Math.min(Math.max(0, x), Math.max(0, vw - chipW)),
+                  Math.min(Math.max(0, y), Math.max(0, vh - chipH)));
+  }
+
+  // El contenido cambia (mensajes, tarjetas, nombres más o menos largos): cuando
+  // el tamaño cambia, reposicionar con el que reporta el observer — cero lecturas
+  // de layout. Durante el arrastre no dispara (el tamaño no cambia), así que no
+  // molesta.
+  function observarTamano(el, aplicar) {
+    if (typeof ResizeObserver !== "function") return;
     new ResizeObserver((entradas) => {
       const caja = entradas[entradas.length - 1].borderBoxSize;
-      const w = caja && caja.length ? caja[0].inlineSize : elPanel.offsetWidth;
-      const h = caja && caja.length ? caja[0].blockSize : elPanel.offsetHeight;
+      const w = caja && caja.length ? caja[0].inlineSize : el.offsetWidth;
+      const h = caja && caja.length ? caja[0].blockSize : el.offsetHeight;
       // Al ocultarse (display:none) el observer reporta 0x0: se ignora para no
       // pisar la caché — así reabrir usa el último tamaño bueno al instante,
       // sin volver a medir layout en cada apertura.
       if (!w || !h) return;
-      panelW = w; panelH = h;
-      if (state === "panel" && !elPanel.hidden) posicionarPanel();
-    }).observe(elPanel);
+      aplicar(w, h);
+    }).observe(el);
   }
+
+  observarTamano(elPanel, (w, h) => {
+    panelW = w; panelH = h;
+    if (state === "panel" && !elPanel.hidden) posicionarPanel();
+  });
+  observarTamano(elChip, (w, h) => {
+    chipW = w; chipH = h;
+    if (!elChip.hidden) posicionarChip();
+  });
 
   // ----- Estado persistido (chrome.storage.local) -----
   // Dos ejes independientes, a propósito:
@@ -382,9 +479,16 @@
     cacheChats.set(firma, { datos, ts: Date.now() });
   }
 
+  let chipConContenido = false; // ¿el chip tiene algo que decir de este chat?
+
   function aplicarEstadoUI() {
     elLauncher.hidden = !overlayEnabled || state !== "bubble";
+    // El chip acompaña a la burbuja. Con el panel abierto sobra: la misma
+    // información está dentro, y en mayor detalle.
+    elChip.hidden = !overlayEnabled || state !== "bubble" || !chipConContenido;
     elPanel.hidden = !overlayEnabled || state !== "panel";
+    if (elChip.hidden) elChip.classList.remove("apagado");
+    if (!overlayEnabled || state === "panel") ocultarHover();
   }
   function guardarEstado() {
     try { chrome.storage.local.set({ overlayState: state }); } catch (e) {}
@@ -547,8 +651,233 @@
     // "buscando" es un estado de paso: marcar el chat como cargado con él haría
     // que evaluarChat() lo diera por resuelto y nunca completara la búsqueda.
     if (d && d.estado !== "buscando") firmaCargada = firmaActual;
+    pintarChip();
     pintarPanel();
+    pintarHover();
   }
+
+  // ----- Chip: la identidad del cliente, sin abrir nada -----
+  //
+  // Es el sustituto del nombre del contacto en Google Contacts, que es donde
+  // vivían el nombre real y la secuencia D hasta que WhatsApp empezó a esconder
+  // el teléfono.
+  function pintarChip() {
+    const d = datosChat;
+
+    // Sin chat, grupo o error: el chip no dice nada. Un fallo del backend no es
+    // asunto del operador mientras conversa; si abre el panel, ahí lo verá.
+    if (!d || d.estado === "sin-chat" || d.estado === "grupo" || d.estado === "error") {
+      chipConContenido = false;
+      aplicarEstadoUI();
+      return;
+    }
+
+    let clase = "", html = "", alerta = "";
+
+    if (d.estado === "buscando") {
+      // No se vacía el chip mientras busca: parpadearía en cada cambio de chat.
+      // Se conserva lo anterior, atenuado, hasta que llegue lo nuevo.
+      if (chipConContenido) elChip.classList.add("apagado");
+      aplicarEstadoUI();
+      return;
+    }
+
+    if (d.estado === "sin-numero") {
+      clase = "apagado";
+      html = `<span class="nom">Sin número</span>` +
+             (d.username ? `<span class="nota">${escapeHtml(d.username)}</span>` : "");
+    } else if (!d.found) {
+      clase = "apagado";
+      html = `<span class="nom">Desconocido</span>`;
+    } else {
+      // Aviso de que hay algo que mirar antes de contestar.
+      if (d.notas.length || d.garantia || tieneCuentaCaida(d)) alerta = `<span class="alerta">●</span>`;
+
+      if (!d.activas) {
+        clase = "apagado";
+        html = `<span class="nom">${escapeHtml(d.nombre || "Cliente")}</span>` +
+               `<span class="nota">sin activas</span>`;
+      } else {
+        clase = urgenciaClase(d.minDias);
+        html = `<span class="nom">${escapeHtml(d.nombre || "Cliente")}</span>` +
+               (d.dStr ? `<span class="ds">${escapeHtml(d.dStr)}</span>` : "");
+      }
+    }
+
+    elChip.className = "chip" + (clase ? " " + clase : "");
+    elChip.innerHTML = html + alerta;
+    chipConContenido = true;
+    aplicarEstadoUI();
+    if (!elChip.hidden) posicionarChip();
+  }
+
+  // Alguna cuenta madre caída: lo que el cliente está escribiendo probablemente
+  // es una garantía, no una renovación.
+  function tieneCuentaCaida(d) {
+    return d.accounts.some((a) => a.provider_account_status === "limbo" || a.provider_account_status === "dead");
+  }
+
+  function urgenciaClase(dias) {
+    if (typeof dias !== "number") return "";
+    if (dias < 0) return "urge";
+    if (dias <= 3) return "pronto";
+    return "";
+  }
+
+  function moneda(n) {
+    if (typeof n !== "number") return "";
+    return "$" + Math.round(n).toLocaleString("es-CO");
+  }
+
+  // ----- Ficha al hover -----
+  //
+  // Pasar el ratón por encima y saber con quién se está hablando, sin abrir nada
+  // y sin perder el sitio en la conversación.
+  const HOVER_CIERRE_MS = 180;
+  const MAX_CUENTAS_FICHA = 6;
+  let hoverTimer = null;
+  let hoverAbierto = false;
+  let arrastrando = false;
+  let fichaW = 0, fichaH = 0;
+
+  observarTamano(elFicha, (w, h) => {
+    fichaW = w; fichaH = h;
+    if (!elFicha.hidden) colocarFlotante(elFicha, fichaW, fichaH);
+  });
+
+  function ocultarHover() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    hoverAbierto = false;
+    elFicha.hidden = true;
+  }
+
+  function mostrarHover() {
+    // Con el panel abierto sobra: la misma información está dentro y con más
+    // detalle. Y durante el arrastre solo estorbaría.
+    if (!overlayEnabled || state !== "bubble" || arrastrando) return;
+    if (!datosChat || !chipConContenido) return;
+    hoverAbierto = true;
+    pintarHover();
+  }
+
+  function pintarHover() {
+    if (!hoverAbierto) return;
+    const d = datosChat;
+    if (!d) { ocultarHover(); return; }
+
+    // Mientras se busca, la ficha se queda con lo anterior en vez de vaciarse:
+    // al cambiar de chat con el ratón encima, parpadearía.
+    if (d.estado === "buscando" && !elFicha.hidden) return;
+
+    if (d.estado === "sin-numero") {
+      elFicha.innerHTML =
+        `<div class="cab"><b>Sin número</b></div>` +
+        (d.username ? `<div class="tel">${escapeHtml(d.username)}</div>` : "") +
+        `<div class="flag gris">WhatsApp no expone el teléfono en este chat. Ábrelo para escribirlo una vez y lo recuerdo.</div>`;
+    } else if (!d.found) {
+      elFicha.innerHTML =
+        `<div class="cab"><b>Desconocido</b></div>` +
+        `<div class="tel">${escapeHtml(d.termino)}</div>` +
+        `<div class="flag gris">Sin registro en Elixir.</div>`;
+    } else {
+      elFicha.innerHTML = fichaHtml(d);
+    }
+
+    elFicha.hidden = false;
+    if (!fichaH) { fichaH = elFicha.offsetHeight || 0; fichaW = elFicha.offsetWidth || 0; }
+    colocarFlotante(elFicha, fichaW, fichaH);
+
+    const cop = elFicha.querySelector(".cop");
+    if (cop) {
+      cop.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await copiar(d.dStr);
+        cop.textContent = "✓";
+        setTimeout(() => { cop.textContent = "Copiar D"; }, 1200);
+      });
+    }
+  }
+
+  function fichaHtml(d) {
+    const antiguedad = [
+      typeof d.meses === "number" && d.meses > 0 ? d.meses + (d.meses === 1 ? " mes" : " meses") : "",
+      typeof d.renovaciones === "number" && d.renovaciones > 0 ? d.renovaciones + " renov." : "",
+    ].filter(Boolean).join(" · ");
+
+    const resumen = [
+      d.activas + (d.activas === 1 ? " activa" : " activas"),
+      typeof d.cerradas === "number" && d.cerradas > 0
+        ? d.cerradas + (d.cerradas === 1 ? " cerrada" : " cerradas") : "",
+      d.mensual ? moneda(d.mensual) + "/mes" : "",
+    ].filter(Boolean).join(" · ");
+
+    let avisos = "";
+    d.notas.slice(0, 2).forEach((n) => {
+      avisos += `<div class="flag ambar">📌 ${escapeHtml(n.content || "")}</div>`;
+    });
+    if (d.garantia) avisos += `<div class="flag roja">🛠️ Tiene una garantía pendiente.</div>`;
+    if (tieneCuentaCaida(d)) avisos += `<div class="flag roja">⚠️ Una cuenta madre está caída: si reclama, es garantía.</div>`;
+    if (d.consent === "do_not_ask") avisos += `<div class="flag gris">🚫 Pidió que no le ofrezcan renovación.</div>`;
+
+    // Sin cuentas activas: la instrucción es limpiar el contacto, y lo último que
+    // se le cerró explica por qué ya no tiene nada.
+    let cuerpo;
+    if (!d.activas) {
+      cuerpo = `<div class="flag ambar">🧹 <b>Limpieza total</b>: quitar la etiqueta <i>pagos</i> y toda D del nombre.</div>`;
+      if (d.cerradasRecientes.length) {
+        cuerpo += `<ul class="cuentas">` + d.cerradasRecientes.map((r) =>
+          `<li><span>${escapeHtml(r.account_type_name || "Cuenta")}</span>` +
+          `<span class="dias">${escapeHtml(MOTIVO_CIERRE[r.close_reason] || r.close_reason || "cerrada")}</span></li>`
+        ).join("") + `</ul>`;
+      }
+    } else {
+      const ord = d.accounts.slice().sort((a, b) => {
+        const x = typeof a.days_remaining === "number" ? a.days_remaining : 9999;
+        const y = typeof b.days_remaining === "number" ? b.days_remaining : 9999;
+        return x - y;   // lo más urgente arriba: es lo que hay que mirar
+      });
+      cuerpo = `<ul class="cuentas">` + ord.slice(0, MAX_CUENTAS_FICHA).map((a) =>
+        `<li><span>${escapeHtml(a.account_type_name || "Cuenta")}</span>` +
+        `<span class="dias ${urgenciaClase(a.days_remaining)}">${escapeHtml(textoDias(a.days_remaining) || "—")}</span></li>`
+      ).join("") + `</ul>`;
+      if (ord.length > MAX_CUENTAS_FICHA) {
+        cuerpo += `<div class="mas">y ${ord.length - MAX_CUENTAS_FICHA} más — clic para verlas todas</div>`;
+      }
+    }
+
+    return (
+      `<div class="cab"><b>${escapeHtml(d.nombre || "Cliente")}</b>` +
+      (antiguedad ? `<span class="anti">${escapeHtml(antiguedad)}</span>` : "") + `</div>` +
+      `<div class="tel">${escapeHtml(d.termino)}</div>` +
+      `<div class="sep"></div>` +
+      (d.dStr
+        ? `<div class="dfila"><span class="ds">${escapeHtml(d.dStr)}</span><button class="cop">Copiar D</button></div>`
+        : "") +
+      (resumen ? `<div class="resumen">${escapeHtml(resumen)}</div>` : "") +
+      avisos + cuerpo
+    );
+  }
+
+  // Escape cierra la ficha. Va en su propio listener y sin capture: el de abajo
+  // filtra por Ctrl/Cmd+Shift y Escape nunca llegaría, y no se puede parar la
+  // propagación porque WhatsApp usa Escape para sus propias cosas.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && hoverAbierto) ocultarHover();
+  });
+
+  // La zona sensible es burbuja + chip + ficha. El cierre se retrasa porque entre
+  // la burbuja y la ficha hay un hueco de GAP px: sin margen, cruzarlo con el
+  // ratón cerraría la ficha justo cuando se va a leer.
+  [elLauncher, elChip, elFicha].forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+      if (!hoverAbierto) mostrarHover();
+    });
+    el.addEventListener("mouseleave", () => {
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(ocultarHover, HOVER_CIERRE_MS);
+    });
+  });
 
   // ----- Render -----
   function setBody(html) { elBody.innerHTML = html; }
@@ -882,6 +1211,7 @@
       d.raf = 0;
       pos = clampPos(d.baseLeft + (d.lx - d.x), d.baseTop + (d.ly - d.y));
       aplicarPosBurbuja();
+      if (!elChip.hidden) posicionarChip();    // el chip va pegado a la burbuja
       if (state === "panel") posicionarPanel();
       if (!elToast.hidden) posicionarToast(); // la nota viaja con la burbuja
     }
@@ -892,6 +1222,7 @@
       const movido = d.moved;
       if (movido && aplicarFinal) frame(); // aplica la última coordenada ya mismo
       d = null;
+      arrastrando = false;
       handle.classList.remove("dragging");
       if (movido) persistirPos();
       return movido;
@@ -910,6 +1241,8 @@
       if (!d.moved) {
         if (Math.hypot(d.lx - d.x, d.ly - d.y) < DRAG_UMBRAL) return;
         d.moved = true;
+        arrastrando = true;
+        ocultarHover();   // la ficha estorba mientras se coloca la burbuja
         handle.classList.add("dragging"); // una sola vez, no en cada move
       }
       if (!d.raf) d.raf = requestAnimationFrame(frame);
@@ -927,6 +1260,7 @@
   }
 
   hacerArrastrable(elLauncher, () => setState("panel")); // clic en la burbuja abre el panel
+  hacerArrastrable(elChip, () => setState("panel"));     // y el chip es parte de la burbuja
   hacerArrastrable(shadow.querySelector(".hdr"));        // arrastrar el panel por su cabecera
 
   // ----- Tocar fuera del panel → minimizar a burbuja -----
@@ -943,8 +1277,10 @@
     vh = window.innerHeight;
     pos = clampPos(pos.left, pos.top);
     aplicarPosBurbuja();
+    if (!elChip.hidden) posicionarChip();
     if (state === "panel") posicionarPanel();
     if (!elToast.hidden) posicionarToast();
+    ocultarHover(); // reposicionarla sería peor que rehacerla al volver a entrar
   });
 
   // ----- Atajo de teclado en página: Ctrl/Cmd+Shift+Space -----

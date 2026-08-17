@@ -556,13 +556,14 @@
 
   // ----- Lookup (vía background, omite CORS) -----
   let reqId = 0;
-  let ultimoNumero = null;
 
-  function lookup(numero) {
+  // `termino` y no `numero`: hoy siempre es un teléfono, pero la columna whatsapp
+  // de la web aceptará también nombres de usuario. Cuando pase, esto viaja igual
+  // y es el backend quien decide cómo buscar.
+  function lookup(termino) {
     const id = ++reqId;
-    ultimoNumero = numero;
     setMsg("Buscando…");
-    chrome.runtime.sendMessage({ type: "elixir-lookup", numero }, (resp) => {
+    chrome.runtime.sendMessage({ type: "elixir-lookup", termino }, (resp) => {
       buscando = false;
       if (id !== reqId) return; // respuesta vieja (cambió el chat): ignorar
       if (resp && resp.aborted) return;
@@ -575,7 +576,7 @@
         return;
       }
       firmaCargada = firmaChat(); // cache: reabrir el mismo chat no re-busca
-      renderCuentas(numero, data.accounts);
+      renderCuentas(termino, data.accounts);
       // Solo si el panel sigue abierto: si se minimizó mientras la respuesta
       // venía en vuelo, no hay que medir/posicionar un panel oculto.
       if (state === "panel") posicionarPanel();

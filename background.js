@@ -9,7 +9,10 @@ chrome.runtime.onInstalled.addListener(() => {
 // ---------------------------------------------------------------------------
 let lookupController = null;
 
-async function lookupCuentas(numero) {
+// `termino` y no `numero`: hoy siempre es un teléfono, pero la columna whatsapp
+// de la web aceptará también nombres de usuario, y entonces esto viajará tal cual
+// sin tener que tocar la extensión. Quien decide cómo buscar es el backend.
+async function lookupCuentas(termino) {
   const { baseUrl, apiKey } = await chrome.storage.local.get(["baseUrl", "apiKey"]);
   if (!apiKey) return { ok: false, status: 401, error: "API key inválida o no configurada" };
   if (!baseUrl) return { ok: false, error: "Configura la BASE_URL en Ajustes" };
@@ -19,7 +22,7 @@ async function lookupCuentas(numero) {
   const controller = new AbortController();
   lookupController = controller;
 
-  const url = baseUrl.replace(/\/+$/, "") + "/api/extension/lookup?whatsapp=" + encodeURIComponent(numero);
+  const url = baseUrl.replace(/\/+$/, "") + "/api/extension/lookup?whatsapp=" + encodeURIComponent(termino);
 
   let resp;
   try {
@@ -248,8 +251,13 @@ async function pedirCodigoTelegram(correo, bot, sender) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg && msg.type === "elixir-lookup" && typeof msg.numero === "string") {
-    lookupCuentas(msg.numero).then(sendResponse).catch((err) =>
+  if (msg && msg.type === "elixir-lookup") {
+    // msg.numero es el nombre viejo del campo. Al actualizar la extensión, el
+    // service worker se recarga pero las pestañas de WhatsApp abiertas siguen
+    // con el content script anterior: durante ese rato mandan `numero`.
+    const termino = typeof msg.termino === "string" ? msg.termino : msg.numero;
+    if (typeof termino !== "string") return;
+    lookupCuentas(termino).then(sendResponse).catch((err) =>
       sendResponse({ ok: false, error: String(err) })
     );
     return true; // respuesta asíncrona

@@ -476,6 +476,16 @@
     });
   }
 
+  // rapido: para la detección automática al cambiar de chat, que ocurre sola y no
+  // puede interferir con lo que el operador está haciendo. Corre las fuentes que
+  // solo leen el DOM o el storage (header, jid, mensaje de sistema, caché) y se
+  // salta las dos que TOCAN LA INTERFAZ: abrir el panel de contacto (S5) y sacar
+  // el modal (S6).
+  //
+  // Antes cortaba justo después del jid, así que en modo rápido se perdían el
+  // mensaje de sistema y la caché — precisamente las dos fuentes que resuelven a
+  // los contactos que solo exponen @usuario, que son los que más importan ahora
+  // que WhatsApp está escondiendo el teléfono.
   async function obtenerIdentidad(opts) {
     var o = Object.assign(
       { rapido: false, permitirPanel: true, permitirManual: false, motivo: "" },
@@ -499,9 +509,6 @@
     // S2 — jid de las filas de mensaje
     if (info.numero) return armar(info.numero, usuarioDesdeHeader(), "jid", base);
 
-    // Modo rápido (overlay al cambiar de chat): ni storage ni clicks.
-    if (o.rapido) return Object.assign(vacio(), base, { fuente: "no-encontrado" });
-
     if (info.esGrupo) return Object.assign(vacio(), base, { fuente: "grupo" });
 
     // S3 — mensaje de sistema del @usuario
@@ -516,7 +523,7 @@
 
     // S5 — panel de info del contacto (la única fuente que toca la interfaz)
     var userPanel = null;
-    if (o.permitirPanel) {
+    if (o.permitirPanel && !o.rapido) {
       var yaEstaba = panelAbierto();
       var abierto = await abrirPanelContacto();
       var leido = abierto ? leerPanelContacto() : { numero: null, username: null };
@@ -530,7 +537,7 @@
     var user = userPanel || (sis && sis.username) || null;
 
     // S6 — pedirlo, y recordarlo para las próximas visitas a este chat
-    if (o.permitirManual) {
+    if (o.permitirManual && !o.rapido) {
       var manual = await pedirNumeroManual({
         motivo: o.motivo,
         username: user,

@@ -39,13 +39,14 @@ function hasChromeStorage() {
 function getConfig() {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.get(["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
+      chrome.storage.local.get(["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "overlayEnabled", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
     } else {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
         apiKey: localStorage.getItem("apiKey") || "",
         codigosUrl: localStorage.getItem("codigosUrl") || "",
         codigosApiKey: localStorage.getItem("codigosApiKey") || "",
+        overlayEnabled: localStorage.getItem("overlayEnabled") !== "false", // encendido salvo que se apague
         tgEnabled: localStorage.getItem("tgEnabled") !== "false", // encendido salvo que se apague
         tgBotKh: localStorage.getItem("tgBotKh") || "",
         tgBotWolf: localStorage.getItem("tgBotWolf") || "",
@@ -539,6 +540,8 @@ async function cargarConfigEnInputs() {
   if (cfg.apiKey) document.getElementById("cfgApiKey").value = cfg.apiKey;
   document.getElementById("cfgCodigosUrl").value = cfg.codigosUrl || "https://codigos.elixircuentas.com";
   if (cfg.codigosApiKey) document.getElementById("cfgCodigosApiKey").value = cfg.codigosApiKey;
+  // El flotante viene encendido salvo que se haya apagado a propósito.
+  document.getElementById("cfgOverlayEnabled").checked = cfg.overlayEnabled !== false;
   // !!cfg.tgEnabled dejaría en false a quien nunca lo configuró: solo apagamos
   // si hay un false guardado a propósito.
   tgEnabled = cfg.tgEnabled !== false;
@@ -554,13 +557,14 @@ async function guardarConfig() {
   const apiKey = document.getElementById("cfgApiKey").value.trim();
   const codigosUrl = document.getElementById("cfgCodigosUrl").value.trim().replace(/\/+$/, "");
   const codigosApiKey = document.getElementById("cfgCodigosApiKey").value.trim();
+  const overlayEnabledNuevo = document.getElementById("cfgOverlayEnabled").checked;
   const tgEnabledNuevo = document.getElementById("cfgTgEnabled").checked;
   const tgBotKhNuevo = document.getElementById("cfgTgBotKh").value.trim().replace(/^@/, "");
   const tgBotWolfNuevo = document.getElementById("cfgTgBotWolf").value.trim().replace(/^@/, "");
   tgEnabled = tgEnabledNuevo;
   if (tgBotKhNuevo) tgBotKh = tgBotKhNuevo;
   if (tgBotWolfNuevo) tgBotWolf = tgBotWolfNuevo;
-  await setConfig({ baseUrl, apiKey, codigosUrl, codigosApiKey, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
+  await setConfig({ baseUrl, apiKey, codigosUrl, codigosApiKey, overlayEnabled: overlayEnabledNuevo, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {
@@ -603,13 +607,22 @@ document.addEventListener("DOMContentLoaded", function () {
   // chrome.storage.onChanged, así que reaparece sin recargar WhatsApp.
   document.getElementById("btnMostrarPanel").addEventListener("click", async function () {
     try {
-      const { overlayState } = await chrome.storage.local.get("overlayState");
-      if (overlayState === "bubble" || overlayState === "panel") {
-        // No lo tocamos: escribir "bubble" estando en "panel" lo minimizaría.
-        setMensaje("El panel ya está visible en WhatsApp Web.");
+      const { overlayState, overlayEnabled } = await chrome.storage.local.get([
+        "overlayState", "overlayEnabled",
+      ]);
+      if (overlayEnabled !== false) {
+        // Ya está encendido. No se toca overlayState: escribir "bubble" estando
+        // en "panel" lo minimizaría, que es lo contrario de lo que se pidió.
+        setMensaje(
+          overlayState === "panel"
+            ? "El panel ya está abierto en WhatsApp Web."
+            : "El panel ya está visible en WhatsApp Web."
+        );
         return;
       }
-      await chrome.storage.local.set({ overlayState: "bubble" });
+      // Rescate: alguien lo apagó en Ajustes y este botón es lo primero que se
+      // prueba. El overlay escucha overlayEnabled, así que vuelve sin recargar.
+      await chrome.storage.local.set({ overlayEnabled: true, overlayState: "bubble" });
       setMensaje("Panel activado. Míralo en la pestaña de WhatsApp Web.");
     } catch (e) {
       setMensaje("No se pudo activar el panel.", true);

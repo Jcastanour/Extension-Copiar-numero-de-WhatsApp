@@ -150,8 +150,7 @@
         <span class="ttl">⚡ Cuentas</span>
         <div class="hdr-actions">
           <button class="mini" id="btnRefresh" title="Buscar ahora">🔍</button>
-          <button class="mini" id="btnCollapse" title="Colapsar">—</button>
-          <button class="mini" id="btnClose" title="Ocultar">✕</button>
+          <button class="mini" id="btnClose" title="Minimizar">✕</button>
         </div>
       </div>
       <div class="body" id="body">
@@ -238,10 +237,17 @@
   }
 
   // ----- Estado persistido (chrome.storage.local) -----
-  // "bubble" (defecto): solo la burbuja, sin lookup automático.
-  // "panel": panel abierto; al entrar se dispara el lookup del chat actual.
-  // "hidden": nada visible; solo se sale con el atajo de teclado.
+  // Dos ejes independientes, a propósito:
+  //
+  //   overlayState  DÓNDE estoy — "bubble" (defecto) o "panel".
+  //   overlayEnabled  SI el flotante existe. Solo se apaga desde Ajustes.
+  //
+  // Antes había un tercer estado, "hidden", al que llevaba la ✕ del panel. Como
+  // se persistía, quien no conociera el atajo se quedaba sin flotante para
+  // siempre: recargar no lo devolvía. Ahora la ✕ minimiza y el apagado de verdad
+  // es una decisión explícita en Ajustes, que sí se puede deshacer desde ahí.
   let state = "bubble";
+  let overlayEnabled = true;      // el flotante siempre activo (se apaga en Ajustes)
   let tgEnabled = true;           // Telegram encendido por defecto (se apaga en Ajustes)
   let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
   let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
@@ -288,8 +294,8 @@
   let firmaCargada = null;      // firma del chat cuyas cuentas están renderizadas (cache)
 
   function aplicarEstadoUI() {
-    elLauncher.hidden = state !== "bubble";
-    elPanel.hidden = state !== "panel";
+    elLauncher.hidden = !overlayEnabled || state !== "bubble";
+    elPanel.hidden = !overlayEnabled || state !== "panel";
   }
   function guardarEstado() {
     try { chrome.storage.local.set({ overlayState: state }); } catch (e) {}
@@ -307,8 +313,6 @@
   }
 
   // ----- Aviso flotante (toast) junto a la burbuja -----
-  const TECLA_ATAJO = navigator.platform.indexOf("Mac") === 0 ? "Cmd+Shift+Espacio" : "Ctrl+Shift+Espacio";
-
   let toastTimer = null;
   function mostrarAviso(texto, ms) {
     elToast.textContent = texto;
@@ -591,7 +595,7 @@
   }
 
   function evaluarChat() {
-    if (state !== "panel" || buscando) return;
+    if (!overlayEnabled || state !== "panel" || buscando) return;
     const firma = firmaChat();
     if (!firma) { setState("bubble"); mostrarAviso("Abre un chat"); return; }
     if (firma === firmaCargada) { posicionarPanel(); return; } // ya tenemos sus cuentas: cache
@@ -617,15 +621,10 @@
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
   // ----- Botones -----
-  shadow.getElementById("btnCollapse").addEventListener("click", () => setState("bubble")); // — minimiza a burbuja
-  // ✕ oculta todo. Se avisa SIEMPRE cómo volver: el estado se persiste, así que
-  // sin este aviso quien no conozca el atajo se queda sin panel para siempre
-  // (recargar no lo devuelve). El toast es independiente del panel y del
-  // launcher, por eso se ve aunque ambos estén ocultos.
-  shadow.getElementById("btnClose").addEventListener("click", () => {
-    setState("hidden");
-    mostrarAviso("Oculto. Vuelve con " + TECLA_ATAJO + " o desde el icono de la extensión.", 6000);
-  });
+  // ✕ minimiza a la burbuja. No apaga nada: el flotante está siempre disponible y
+  // el interruptor de verdad vive en Ajustes del popup. Sin aviso, porque ya no
+  // hay nada que explicar — la burbuja sigue ahí, a la vista.
+  shadow.getElementById("btnClose").addEventListener("click", () => setState("bubble"));
   shadow.getElementById("btnRefresh").addEventListener("click", () => { firmaCargada = null; buscarAhora(); }); // 🔍 fuerza re-búsqueda
 
   // ----- Arrastre (burbuja y cabecera del panel) -----
@@ -726,7 +725,10 @@
 
     if (e.code === "Space") {
       e.preventDefault();
-      setState(state === "panel" ? "bubble" : "panel"); // toggle (también saca de "hidden")
+      // Apagado desde Ajustes = apagado: el atajo no lo resucita. Volver es una
+      // decisión explícita, en el mismo sitio donde se apagó.
+      if (!overlayEnabled) return;
+      setState(state === "panel" ? "bubble" : "panel");
       return;
     }
 
@@ -757,12 +759,20 @@
     chrome.storage.local.get(
       ["overlayState", "overlayEnabled", "overlayCollapsed", "overlayPos", "tgEnabled", "tgBotKh", "tgBotWolf"],
       (cfg) => {
-        if (cfg && (cfg.overlayState === "bubble" || cfg.overlayState === "panel" || cfg.overlayState === "hidden")) {
-          state = cfg.overlayState;
-        } else if (cfg && cfg.overlayEnabled === false) {
-          state = "hidden"; // migración del esquema viejo (estaba "cerrado")
+        // Migración: quien pulsó la ✕ en una versión anterior tiene guardado
+        // "hidden" y, sin esto, seguiría sin ver el flotante después de
+        // actualizar — que es justo el atasco que veníamos a quitar. Ese
+        // "hidden" se reinterpreta como lo que de verdad quiso decir: apagado.
+        // Se reescribe en storage para no volver a migrarlo en cada carga.
+        if (cfg && cfg.overlayState === "hidden") {
+          state = "bubble";
+          overlayEnabled = false;
+          try { chrome.storage.local.set({ overlayState: "bubble", overlayEnabled: false }); } catch (_) {}
         } else {
-          state = "bubble"; // por defecto solo la burbuja
+          state = (cfg && cfg.overlayState === "panel") ? "panel" : "bubble";
+          // Solo se apaga con un false guardado a propósito: quien nunca tocó el
+          // ajuste debe ver el flotante.
+          if (cfg && cfg.overlayEnabled === false) overlayEnabled = false;
         }
         pos = (cfg && cfg.overlayPos && typeof cfg.overlayPos.left === "number")
           ? clampPos(cfg.overlayPos.left, cfg.overlayPos.top)
@@ -783,15 +793,26 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
 
-      // El popup puede reabrir el overlay escribiendo overlayState. Es la única
-      // salida fiable del estado "hidden": el atajo de teclado puede estar
-      // ocupado por el navegador y el estado sobrevive a recargar la página.
+      // El interruptor de Ajustes. Es la única forma de apagar y de encender el
+      // flotante, y surte efecto sin recargar WhatsApp.
+      if (changes.overlayEnabled) {
+        const activo = changes.overlayEnabled.newValue !== false;
+        if (activo !== overlayEnabled) {
+          overlayEnabled = activo;
+          aplicarEstadoUI();
+          if (overlayEnabled && state === "panel") { posicionarPanel(); evaluarChat(); }
+        }
+      }
+
+      // El popup también puede mover el overlay entre burbuja y panel.
       if (changes.overlayState) {
-        const nuevo = changes.overlayState.newValue;
-        if ((nuevo === "bubble" || nuevo === "panel" || nuevo === "hidden") && nuevo !== state) {
+        // Una pestaña con la versión anterior todavía puede escribir "hidden":
+        // aquí se lee como burbuja, que es lo que la ✕ significa ahora.
+        const nuevo = changes.overlayState.newValue === "panel" ? "panel" : "bubble";
+        if (nuevo !== state) {
           state = nuevo;
           aplicarEstadoUI();
-          if (state === "panel") { posicionarPanel(); evaluarChat(); }
+          if (overlayEnabled && state === "panel") { posicionarPanel(); evaluarChat(); }
         }
       }
 

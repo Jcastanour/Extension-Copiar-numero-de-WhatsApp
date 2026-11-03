@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Copiar número de WhatsApp",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Muestra sobre el chat de WhatsApp quién es el cliente, sus días de cobro y sus cuentas de Elixir.",
   "permissions": ["activeTab", "scripting", "clipboardWrite", "storage", "tabs"],
   "action": {
@@ -34,6 +34,8 @@
     "https://elixircuentas-test.fly.dev/*",
     "https://elixircuentas.com/*",
     "https://codigos.elixircuentas.com/*",
+    "https://storetools.co/*",
+    "https://api.fastcodemanager.com/*",
     "http://localhost/*"
   ],
   "commands": {

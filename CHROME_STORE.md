@@ -1,16 +1,37 @@
-# Publicación en Chrome Web Store — v1.5.0
+# Publicación en Chrome Web Store — v1.6.0
 
 Documento de apoyo para subir la versión y completar el formulario de la tienda
 (justificaciones de permisos, divulgación de datos y política de privacidad).
 
-> ✅ **La v1.5.0 NO añade permisos.** Mismos 5 permisos y mismos 5 hosts que la
-> 1.4.0, así que **la declaración de datos del formulario no cambia** y la revisión
-> debería ser rápida. Verificado comparando los dos zips.
+> ⚠️ **La v1.6.0 SÍ añade dos permisos de host**: `https://storetools.co/*` y
+> `https://api.fastcodemanager.com/*`. Son los servicios de dos proveedores a los
+> que, **si el usuario lo activa en Ajustes**, se pide el código de verificación
+> directamente en vez de a través de su bot de Telegram. Los 5 permisos de API
+> siguen siendo los mismos. Como en la 1.4.0, la revisión puede tardar más.
+>
+> **Dato nuevo que declarar**: a esos dos servicios se envía el **correo de la
+> cuenta de streaming** (dato del negocio) y, a Storetools, el **ID de consulta**
+> que el propio usuario escribe en Ajustes. Hay que actualizar el Google Doc de
+> la política (sección 5) **antes** de enviar el formulario.
 >
 > El manifest del repo lleva `http://localhost/*` para poder probar contra el
 > backend del propio equipo, pero **`empaquetar.sh` lo quita del zip** trabajando
 > sobre una copia. No hay que editar nada a mano ni acordarse de revertirlo.
 
+> **Qué trae la v1.6.0:**
+>
+> - Para cada proveedor se elige en Ajustes si el código se pide al bot de
+>   Telegram (defecto) o directo a su endpoint: ProveedorYT (Storetools) y
+>   Digital KH (FastCodeManager). Netflix sigue por el buzón propio.
+> - Las cuentas de ProveedorYT ya van a su bot, no al de Wolf.
+> - La barra del flotante se limpia al cambiar de chat.
+
+<details>
+<summary><b>Historial: qué pasó en la v1.5.0</b> (ya publicada, se conserva por contexto)</summary>
+
+> ✅ **La v1.5.0 NO añade permisos.** Mismos 5 permisos y mismos 5 hosts que la
+> 1.4.0, así que la declaración de datos del formulario no cambió.
+>
 > **Qué trae la v1.5.0:**
 >
 > - El clic en el flotante resuelve el chat y muestra la ficha del cliente: nombre,
@@ -21,6 +42,8 @@ Documento de apoyo para subir la versión y completar el formulario de la tienda
 > - La ✕ del panel **minimiza**; el flotante se apaga desde la pantalla principal
 >   del popup, y apagado no deja nada corriendo en WhatsApp.
 > - Forma del flotante configurable: burbuja o barra.
+
+</details>
 
 <details>
 <summary><b>Historial: qué pasó en la v1.4.0</b> (ya publicada, se conserva por contexto)</summary>
@@ -77,6 +100,8 @@ proveedores en Telegram.
 | `*://web.telegram.org/*` | Automatizar la solicitud de códigos a los bots de los proveedores. |
 | `https://elixircuentas.com/*` | Consultar la API de cuentas (`/api/extension/lookup`). |
 | `https://codigos.elixircuentas.com/*` | Consultar el servicio propio que extrae del buzón del negocio el código de verificación de Netflix (`/api/code`). |
+| `https://storetools.co/*` | (v1.6.0) Consultar el servicio del proveedor ProveedorYT que devuelve el correo con el código de verificación (`/api/consultar`), si el usuario elige "endpoint directo" en Ajustes. |
+| `https://api.fastcodemanager.com/*` | (v1.6.0) Consultar el servicio del proveedor Digital KH que devuelve el código de verificación (`/enterprise/…/lookup`), si el usuario elige "endpoint directo" en Ajustes. |
 | `https://elixircuentas-test.fly.dev/*` | Mismo fin, entorno de pruebas. |
 
 ## 4. Divulgación de datos (Data usage en el Dashboard)
@@ -165,15 +190,20 @@ función descrita. Cuando el usuario pulsa "Ver código", se envía además el c
 la cuenta de streaming al servicio de códigos del propietario
 (codigos.elixircuentas.com), que responde con el código de verificación recibido en
 el buzón del negocio; ese correo es un dato del propio negocio, no del cliente
-final. No vendemos ni transferimos los datos del usuario a terceros, ni
+final. Si el usuario activa en Ajustes el "endpoint directo" de un proveedor, ese
+mismo correo de la cuenta se envía al servicio de dicho proveedor (storetools.co o
+api.fastcodemanager.com), junto con el identificador de consulta que el propio
+usuario haya escrito en Ajustes, y el servicio responde con el código de
+verificación. No vendemos ni transferimos los datos del usuario a terceros, ni
 los usamos para publicidad, marketing o evaluación de solvencia, ni para ningún fin
 ajeno a la funcionalidad principal declarada.
 
 **7. Permisos**
 La Extensión solicita los permisos mínimos necesarios para su función: `activeTab`,
 `scripting`, `clipboardWrite`, `storage` y `tabs`, además de acceso a los dominios
-web.whatsapp.com, web.telegram.org y los backends del propietario
-(elixircuentas.com y codigos.elixircuentas.com). No accede de forma
+web.whatsapp.com, web.telegram.org, los backends del propietario
+(elixircuentas.com y codigos.elixircuentas.com) y los servicios de códigos de dos
+proveedores (storetools.co y api.fastcodemanager.com). No accede de forma
 persistente ni invasiva a otras pestañas o ventanas.
 
 **Contacto**
@@ -184,18 +214,11 @@ publicado en la ficha de la Chrome Web Store.
 
 ## 6. Formulario de Privacidad — textos listos para pegar
 
-> **Para la v1.5.0 no hace falta tocar nada del formulario.** No hay permisos ni
-> hosts nuevos respecto a la 1.4.0 (verificado comparando los dos zips), así que
-> las justificaciones de abajo, las casillas de uso de datos y las tres
-> certificaciones siguen valiendo tal cual. Lee antes el aviso de la sección 4
-> sobre las contraseñas y decide si te cambia algo.
->
-> El único texto que conviene refrescar es la **descripción de la tienda** (no el
-> formulario), porque la extensión hace bastante más que copiar un número.
->
-> Si en algún momento sí cambian los permisos: **actualiza primero el Google Doc**
-> de la política con el texto de la sección 5, porque el formulario certifica que
-> coincide con la política publicada.
+> **Para la v1.6.0 sí hay que tocar el formulario**: dos hosts nuevos
+> (`storetools.co` y `api.fastcodemanager.com`). Las casillas de uso de datos y
+> las tres certificaciones siguen valiendo; cambian la justificación de host y la
+> política. **Actualiza primero el Google Doc** de la política con el texto de la
+> sección 5, porque el formulario certifica que coincide con la política publicada.
 
 **Descripción de un solo propósito**
 > Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Para las cuentas de Netflix obtiene el código de verificación consultando un servicio del propietario que lee el buzón del negocio, sin abrir Telegram. Incluye además una utilidad local que decodifica los códigos de recarga que el proveedor entrega codificados, sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
@@ -217,7 +240,7 @@ publicado en la ficha de la Chrome Web Store.
 
 **Justificación de Permiso de host**
 > web.whatsapp.com: leer el número, el nombre y el nombre de usuario del chat visible, y mostrar el panel.
-> codigos.elixircuentas.com: consultar el servicio del propietario que devuelve el código de verificación de Netflix asociado al correo de una cuenta del negocio. web.telegram.org: automatizar la solicitud de códigos de verificación a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario que devuelve las cuentas asociadas al número. Cada host se declara explícitamente para limitar la acción de la extensión a esos dominios.
+> codigos.elixircuentas.com: consultar el servicio del propietario que devuelve el código de verificación de Netflix asociado al correo de una cuenta del negocio. storetools.co y api.fastcodemanager.com: consultar, solo si el usuario lo activa en Ajustes, el servicio del proveedor correspondiente que devuelve el código de verificación asociado al correo de una cuenta del negocio, en lugar de pedirlo a su bot de Telegram. web.telegram.org: automatizar la solicitud de códigos de verificación a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario que devuelve las cuentas asociadas al número. Cada host se declara explícitamente para limitar la acción de la extensión a esos dominios.
 
 **¿Usas código remoto?** → No.
 
@@ -232,7 +255,7 @@ publicado en la ficha de la Chrome Web Store.
 
 ---
 
-## 7. Descripción de la tienda (v1.5.0) — para pegar en el listing
+## 7. Descripción de la tienda (v1.6.0) — para pegar en el listing
 
 **Nombre**
 > Elixir Cuentas — panel de clientes en WhatsApp

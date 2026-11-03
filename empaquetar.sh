@@ -17,7 +17,7 @@ SALIDA="dist/copiar-numero-whatsapp-${VERSION}.zip"
 # tienda rechaza lo que no se usa y cada archivo de más es superficie que revisar.
 ARCHIVOS=(
   manifest.json Logo.png
-  numero-utils.js background.js overlay.js telegram.js
+  numero-utils.js background.js codigo-html.js overlay.js telegram.js
   popup.html popup.js
   copynumber.js copyusername.js copyname.js content.js buscarelixir.js
 )

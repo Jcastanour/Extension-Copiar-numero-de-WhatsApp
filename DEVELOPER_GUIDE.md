@@ -191,6 +191,75 @@ quedar a la vista en una pantalla compartida. Eso vive en el panel, tras un clic
 
 ---
 
+## 📨 5b. Rutas de código por proveedor (quién pide el código y por dónde)
+
+Cada tarjeta de cuenta tiene **un solo botón** de código. Dos preguntas, en este orden, y las dos
+viven en `numero-utils.js` para que el overlay y el popup no las copien (lo hacían, y ProveedorYT
+no estaba en ninguna de las dos copias: caía al bot de Wolf, que lo rechazaba):
+
+1. **`proveedorDe(acc)`** — de quién es la cuenta: `netflix-elixir` (el tipo contiene "netflix"),
+   `storetools` (el proveedor casa con `/yt|youtube|storetools/`), `kh`, `wolf` u `otro`.
+   ProveedorYT se prueba **antes** que kh/wolf. Sin proveedor reconocible se conserva el criterio
+   viejo: Disney → KH, resto → Wolf.
+2. **`rutaCodigo(acc, cfg)`** — por dónde se pide: `directo` (endpoint, desde el service worker)
+   o `telegram` (bot). Lo decide el **interruptor del proveedor en Ajustes** (`modoCodigo`), con
+   Telegram por defecto. El directo solo se elige si además está configurado lo que necesita; si
+   falta, se baja a Telegram sin fallar. Los interruptores son **independientes por proveedor**.
+
+| Proveedor | Directo si… | Telegram |
+|---|---|---|
+| `netflix-elixir` | siempre (no tiene interruptor) → `codigoPorCorreo()` | — |
+| `storetools` | `modoCodigo.storetools = "directo"` **y** hay `storetoolsId` → `codigoStoretools()` | `tgBotStore`, elige plataforma y manda el ID si lo piden |
+| `kh` | `modoCodigo.kh = "directo"` **y** hay `fcmSlug` → `codigoKh()` | `tgBotKh` |
+| `wolf` / `otro` | nunca, todavía (el selector de Ajustes está deshabilitado) | `tgBotWolf` |
+
+El botón directo manda **un solo mensaje** al background, `{type:"codigo-directo", proveedor,
+correo, plataforma}`, y `codigoDirecto()` despacha. Añadir un proveedor es: una entrada en
+`proveedorDe`, una fila en `rutaCodigo`, una función en `background.js` y un `<select>` en Ajustes.
+
+### Storetools (storetools.co)
+
+`POST /api/consultar` con `{plataforma, idPlataforma, correoConsultar, modo:"correo",
+tipoConsulta:"correo", token:null, idUsuarioConsulta, language:"es"}`. La respuesta trae
+`respuesta` ∈ `exito` | `sin_correos` | `sesion` (falta el ID) | `caducado` (límite de consultas) y,
+con `exito`, `resultadoCorreos[]` con el correo **entero en HTML** (`mensaje`): no hay campo de
+código. Lo extrae `codigo-html.js` (`extraerCodigoDeHtml`): quita estilos, scripts, etiquetas y
+caracteres invisibles (Disney mete cientos de ZWNJ en el preheader), y busca por palabra clave
+(`code|código|passcode|pin`), luego el primer bloque de 6 dígitos, luego 4–8 que no sea un año.
+Está probado con tres correos reales en `test/fixtures` (`node test/run.js`). **Las consultas
+están medidas**: la extensión nunca reintenta sola; si viene `cacheInfo.remaining` se lo dice al
+operador. El ID de consulta se guarda en Ajustes (`storetoolsId`, campo de contraseña) y **nunca
+va en el código fuente ni en el zip**.
+
+Los nombres de plataforma **no coinciden** con los tipos de Elixir ("Amazon" es `prime`, "Disney
+Premium" es `disney`, "Max" es `max`). `plataformaStoretools(acc)` casa por palabra clave sobre
+tipo + categoría con la tabla `PLATAFORMAS_STORETOOLS` (ids 1–12, sacados de
+`GET /api/consultar/plataformas`). Si no casa, el botón sigue y, al pulsarlo, aparece un selector
+en la tarjeta: adivinar da "no registra", que engaña. Cuando se cree un tipo nuevo en Elixir que
+sí sea de correo, se añade una regla a esa tabla.
+
+### Digital KH (api.fastcodemanager.com)
+
+`GET /enterprise/{slug}/services` (público) lista los servicios con su `id`; se casa por nombre con
+`KH_PALABRAS` ("Prime Video", "HBO max", "Crunchyrroll" —sic—), no por igualdad. Después
+`POST /enterprise/{slug}/lookup` con `{serviceId, recipientEmail}` devuelve
+`{success, data:{found, code, link, subject, date, registered}}`: ya viene el código, no hay que
+extraer nada. Sin `subjectId` da el correo más reciente del servicio. No necesita cookie ni clave
+(verificado el 2 nov 2026). El listado se cachea 10 min en memoria del service worker.
+
+### Bot de Storetools en Telegram
+
+A diferencia de los bots de KH y Wolf (pegar el correo y leer), este pide **(1)** la plataforma con
+botones inline, **(2)** el correo y, si la cuenta está protegida, **(3)** el ID de consulta; y
+entre medias manda burbujas intermedias ("Consultando correos…"). `telegram.js` lo resuelve con
+`elegirPlataforma()` (busca el botón en la última burbuja con menú; si no está, manda `/start`),
+`RE_INTERMEDIO` (burbujas que se saltan) y `RE_PIDE_ID`. El ID lo lee el **background** de los
+ajustes y lo manda en el mensaje `tg-enviar`: no pasa por la página de WhatsApp. La respuesta final
+es "🔑 Código / Enlace: 1999", que `extraerCodigo()` reconoce primero. Si en vez de dígitos viene
+una URL, se devuelve como `link` y la tarjeta ofrece "Abrir".
+
+---
+
 ## ⚡ 6. Rendimiento (hay un equipo flojo, y va en Edge)
 
 Tres decisiones que existen por eso, y que conviene no deshacer:
@@ -254,6 +323,10 @@ backend. Si esa variable está vacía en el servidor, **todo responde 401** y pa
 está roto.
 
 ### Sin abrir Chrome
+
+`node test/run.js` prueba la extracción de códigos del HTML (`codigo-html.js`) contra correos
+reales guardados en `test/fixtures` y el enrutamiento por proveedor (`rutaCodigo`) con fixtures de
+Netflix, KH, Wolf, ProveedorYT y proveedor desconocido. No necesita dependencias.
 
 `overlay.js` arranca en jsdom con un WhatsApp de mentira, lo que caza errores de arranque, TDZ y
 typos en segundos. Hace falta stubear `ResizeObserver`, `setPointerCapture`/`releasePointerCapture`

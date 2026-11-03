@@ -7,6 +7,7 @@ Una extensión robusta para Google Chrome que te permite extraer con un clic los
 - **Resistente a actualizaciones:** A diferencia de otras extensiones, no depende de selectores CSS frágiles ni de posiciones complejas en el código (que cambian constantemente). Utiliza búsquedas matemáticas en la interfaz (Regex y Coordenadas) para garantizar que seguirá funcionando por meses.
 - **Trazabilidad Oculta:** La extensión abre milimétricamente la Información del Contacto y la vuelve a cerrar tan rápido que casi ni te percatas.
 - **Integración con Google Contacts:** Abre en otra pestaña un formulario en Google listo para añadir a la persona a tu lista de contactos en un solo clic.
+- **Códigos de verificación sin salir de WhatsApp:** Netflix por el buzón propio, y para ProveedorYT (Storetools) y Digital KH se elige en Ajustes, **por proveedor**, si el código se pide al bot de Telegram (lo de siempre) o directo al endpoint. Si falta configurar algo, se usa Telegram.
 
 ---
 
@@ -35,4 +36,4 @@ _Nota: Estos atajos son configurables. Ve a [chrome://extensions/shortcuts](chro
 
 ## 🛠 Para Desarrolladores
 
-El código está estructurado para que sea fácil de mantener y leer. Para revisar cómo funciona internamente, entra y lee el archivo **`DEVELOPER_GUIDE.md`** recién incluido.
+El código está estructurado para que sea fácil de mantener y leer. Para revisar cómo funciona internamente, entra y lee el archivo **`DEVELOPER_GUIDE.md`**. Lo que está en marcha y lo que falta vive en **`BACKLOG.md`**. Las pruebas sin navegador se corren con `node test/run.js`.

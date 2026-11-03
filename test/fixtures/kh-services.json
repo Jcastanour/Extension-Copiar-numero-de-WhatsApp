@@ -1,0 +1,202 @@
+{
+ "success": true,
+ "data": {
+  "companyName": "Digital KH",
+  "logoUrl": "/logo.jpeg",
+  "services": [
+   {
+    "id": "c0cd7056-3c8a-42af-ab7f-151d00642082",
+    "name": "Netflix",
+    "logoUrl": "/logo.jpeg",
+    "enabled": true,
+    "requiresManagedAccount": true,
+    "subjects": [
+     {
+      "id": "95fcb53f-ddcb-4e46-8b30-7baacc28ff32",
+      "label": "cambio de contraseña",
+      "enabled": true
+     },
+     {
+      "id": "eaf83674-9d0d-45f4-b682-9f02293a51ab",
+      "label": "Código de verificación",
+      "enabled": true
+     },
+     {
+      "id": "04b219d1-dbf0-4f75-9945-e00197cbec9f",
+      "label": "Codigo inicio de sesión",
+      "enabled": true
+     },
+     {
+      "id": "8d1be242-8821-47cb-9a21-ab96f35b7c42",
+      "label": "Codigo de Viaje",
+      "enabled": true
+     },
+     {
+      "id": "9c0c4425-2778-45ae-804e-b26f4fe4fe7b",
+      "label": "Actualizar, Confirmar Hogar",
+      "enabled": true
+     }
+    ],
+    "backgroundColor": "#1e3a5f",
+    "backgroundColorSecondary": "#E50914",
+    "backgroundColorIntensity": 100,
+    "decorativeImageUrl": "/uploads/company-service-visuals/4ea832e1-01ed-40d2-8cef-0cd5be6c7c55.png",
+    "decorativeImageOpacity": 100,
+    "decorativeImagePositionX": 0,
+    "decorativeImagePositionY": 100,
+    "decorativeImageScale": 112,
+    "isVisualCustomized": true
+   },
+   {
+    "id": "312693d7-8c06-4dc6-9e82-26f03174a3d9",
+    "name": "Disney+",
+    "logoUrl": "/logo.jpeg",
+    "enabled": true,
+    "requiresManagedAccount": true,
+    "subjects": [
+     {
+      "id": "5b41b934-c74f-4c84-8cbf-d02fe127ff13",
+      "label": "Código de inicio de sesión",
+      "enabled": true
+     },
+     {
+      "id": "7bd3444a-5c53-4463-9c36-22ced6c5eb91",
+      "label": "Actualizar Hogar",
+      "enabled": true
+     }
+    ],
+    "backgroundColor": "#1e3a5f",
+    "backgroundColorSecondary": "#10A7C1",
+    "backgroundColorIntensity": 100,
+    "decorativeImageUrl": "/uploads/company-service-visuals/eb07e054-9acc-4ca3-969a-81a801adff81.png",
+    "decorativeImageOpacity": 100,
+    "decorativeImagePositionX": 100,
+    "decorativeImagePositionY": 100,
+    "decorativeImageScale": 112,
+    "isVisualCustomized": true
+   },
+   {
+    "id": "2ff554e6-865e-4c41-8307-cc5558aced54",
+    "name": "Prime Video",
+    "logoUrl": "/logo.jpeg",
+    "enabled": true,
+    "requiresManagedAccount": true,
+    "subjects": [
+     {
+      "id": "b4761889-706d-4e20-a125-38ee2f2ae043",
+      "label": "Codigo inicio de sesión",
+      "enabled": true
+     },
+     {
+      "id": "22be88b8-f4c5-492e-9fa0-a6143cb89a91",
+      "label": "Cambiar contraseña",
+      "enabled": true
+     }
+    ],
+    "backgroundColor": "#006eff",
+    "backgroundColorSecondary": "#1e3a5f",
+    "backgroundColorIntensity": 100,
+    "decorativeImageUrl": "/uploads/company-service-visuals/6f3017d4-55e4-4988-a79b-c15561a75ce8.png",
+    "decorativeImageOpacity": 100,
+    "decorativeImagePositionX": 100,
+    "decorativeImagePositionY": 100,
+    "decorativeImageScale": 113,
+    "isVisualCustomized": true
+   },
+   {
+    "id": "e59f3a0c-60f9-4004-aacc-85d0edf6d44e",
+    "name": "HBO max",
+    "logoUrl": "/logo.jpeg",
+    "enabled": true,
+    "requiresManagedAccount": true,
+    "subjects": [
+     {
+      "id": "a8904b5c-8028-4243-8ab8-f4f0c3cdd28f",
+      "label": "Codigo de incio de sesión",
+      "enabled": true
+     },
+     {
+      "id": "ff9985d5-63f5-4632-b170-11ef78fc3aa2",
+      "label": "Cambio de Contraseña",
+      "enabled": true
+     },
+     {
+      "id": "7b4f8424-25ac-4a80-8969-6a8b34ccf1ad",
+      "label": "Actualizar Hogar",
+      "enabled": true
+     }
+    ],
+    "backgroundColor": "#111113",
+    "backgroundColorSecondary": "#969696",
+    "backgroundColorIntensity": 100,
+    "decorativeImageUrl": "/uploads/company-service-visuals/dd8fa09e-5d52-4178-9180-335019f72e48.png",
+    "decorativeImageOpacity": 100,
+    "decorativeImagePositionX": 100,
+    "decorativeImagePositionY": 100,
+    "decorativeImageScale": 113,
+    "isVisualCustomized": true
+   },
+   {
+    "id": "88aa1e49-f116-4a82-b3c1-ab677f7620d5",
+    "name": "Crunchyrroll",
+    "logoUrl": "/logo.jpeg",
+    "enabled": true,
+    "requiresManagedAccount": true,
+    "subjects": [
+     {
+      "id": "2747c29e-b465-467d-a7cf-11166423102f",
+      "label": "Confirmacion de Sesión",
+      "enabled": true
+     },
+     {
+      "id": "24abadd6-3558-40cf-866e-767357d24394",
+      "label": "Cambio de contraseña",
+      "enabled": true
+     },
+     {
+      "id": "16be410b-5ea9-4daf-a2a5-0d0100163c13",
+      "label": "Confirmar Inicio de sesion",
+      "enabled": true
+     }
+    ],
+    "backgroundColor": "#1e3a5f",
+    "backgroundColorSecondary": "#F97316",
+    "backgroundColorIntensity": 100,
+    "decorativeImageUrl": "/uploads/company-service-visuals/ba18c85f-5c8c-4f84-9e5e-5875b0ab26a0.png",
+    "decorativeImageOpacity": 100,
+    "decorativeImagePositionX": 0,
+    "decorativeImagePositionY": 60,
+    "decorativeImageScale": 116,
+    "isVisualCustomized": true
+   },
+   {
+    "id": "81282316-b9e1-4ed1-bec9-716a9912db4b",
+    "name": "Paramount+",
+    "logoUrl": "/logo.jpeg",
+    "enabled": true,
+    "requiresManagedAccount": true,
+    "subjects": [
+     {
+      "id": "e11a2227-5285-4dcb-8f49-bb957ed02086",
+      "label": "Restablecer Contraseña",
+      "enabled": true
+     },
+     {
+      "id": "1222c585-4fc5-497c-9a9e-ac89b333f88a",
+      "label": "Desconectar dispositivos",
+      "enabled": true
+     }
+    ],
+    "backgroundColor": "#1a2532",
+    "backgroundColorSecondary": "#040bd7",
+    "backgroundColorIntensity": 100,
+    "decorativeImageUrl": "/uploads/company-service-visuals/1f5a0d35-1441-4fc1-bb41-ad8ba72bed85.png",
+    "decorativeImageOpacity": 100,
+    "decorativeImagePositionX": 0,
+    "decorativeImagePositionY": 100,
+    "decorativeImageScale": 111,
+    "isVisualCustomized": true
+   }
+  ]
+ }
+}

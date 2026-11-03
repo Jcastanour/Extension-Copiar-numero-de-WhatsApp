@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.6.0";
   if (window.__elixirUtils && window.__elixirUtils.VERSION === VERSION) return;
 
   // ---------------------------------------------------------------------------
@@ -617,6 +617,117 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Rutas para pedir el código de una cuenta
+  // ---------------------------------------------------------------------------
+  //
+  // Una sola fuente para el overlay y el popup. Antes esta decisión estaba
+  // copiada en los dos, y cada proveedor nuevo había que meterlo dos veces (y
+  // ProveedorYT no se metió en ninguno: caía al bot de Wolf, que lo rechazaba).
+  //
+  // Dos preguntas, en este orden:
+  //   proveedorDe(acc)      de quién es la cuenta (netflix-elixir, storetools, kh, wolf, otro)
+  //   rutaCodigo(acc, cfg)  por dónde se pide: "directo" (endpoint) o "telegram" (bot)
+  //
+  // La ruta la decide el interruptor del proveedor en Ajustes (cfg.modoCodigo),
+  // con Telegram por defecto. El directo solo se elige si además está
+  // configurado lo que necesita; si falta, se baja a Telegram sin fallar.
+
+  function sinAcentos(s) {
+    return String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  }
+
+  // ¿Cuenta de Netflix? Basta con que el nombre o la categoría contengan
+  // "netflix", para que entren todas las variantes del catálogo (Exterior, Cel,
+  // NR / No Renovable, Extra…). Mismo criterio que _is_disney() en el backend.
+  function esNetflix(acc) {
+    var txt = sinAcentos((acc.account_type_name || "") + " " + (acc.category || ""));
+    return txt.indexOf("netflix") !== -1;
+  }
+
+  // Nombre del proveedor tal como lo manda el backend (badge de la tarjeta).
+  function nombreProveedor(acc) {
+    return acc.provider || acc.provider_name || acc.proveedor || "";
+  }
+
+  // De quién es la cuenta. ProveedorYT se prueba ANTES que kh/wolf. Sin
+  // proveedor reconocible se conserva el criterio viejo: Disney → KH, resto → Wolf.
+  function proveedorDe(acc) {
+    if (esNetflix(acc)) return "netflix-elixir";
+    var prov = sinAcentos(nombreProveedor(acc));
+    if (/yt|youtube|storetools/.test(prov)) return "storetools";
+    if (/kh|digital/.test(prov)) return "kh";
+    if (/wolf|andres/.test(prov)) return "wolf";
+    return acc.is_disney ? "kh" : "otro";
+  }
+
+  // Plataformas de Storetools (GET storetools.co/api/consultar/plataformas,
+  // 2 nov 2026). Los nombres NO coinciden con los tipos de Elixir ("Amazon" es
+  // "Prime", "Disney Premium" es "Disney+"), así que se casa por palabra clave
+  // sobre el tipo + categoría. `nombre` es el texto del botón del bot de Telegram.
+  var PLATAFORMAS_STORETOOLS = [
+    { id: "netflix",     num: 1,  nombre: "Netflix",     re: /netflix/ },
+    { id: "disney",      num: 2,  nombre: "Disney+",     re: /disney/ },
+    { id: "prime",       num: 3,  nombre: "Prime",       re: /amazon|prime/ },
+    { id: "max",         num: 4,  nombre: "Max",         re: /\bmax\b|hbo/ },
+    { id: "spotify",     num: 5,  nombre: "Spotify",     re: /spotify/ },
+    { id: "paramount",   num: 6,  nombre: "Paramount+",  re: /paramount/ },
+    { id: "vix",         num: 7,  nombre: "ViX",         re: /\bvix\b/ },
+    { id: "crunchyroll", num: 8,  nombre: "Crunchyroll", re: /crunchy/ },
+    { id: "chatgpt",     num: 9,  nombre: "ChatGPT",     re: /chatgpt|openai/ },
+    { id: "universal",   num: 10, nombre: "Universal+",  re: /universal/ },
+    { id: "appletv",     num: 11, nombre: "Apple Tv",    re: /apple/ },
+    { id: "foxone",      num: 12, nombre: "Fox One",     re: /\bfox\b/ },
+  ];
+
+  function plataformaPorId(id) {
+    for (var i = 0; i < PLATAFORMAS_STORETOOLS.length; i++) {
+      if (PLATAFORMAS_STORETOOLS[i].id === id) return PLATAFORMAS_STORETOOLS[i];
+    }
+    return null;
+  }
+
+  // null si el tipo no casa con ninguna (tipo nuevo): el que llama ofrece elegir.
+  function plataformaStoretools(acc) {
+    var txt = sinAcentos((acc.account_type_name || "") + " " + (acc.category || ""));
+    for (var i = 0; i < PLATAFORMAS_STORETOOLS.length; i++) {
+      if (PLATAFORMAS_STORETOOLS[i].re.test(txt)) return PLATAFORMAS_STORETOOLS[i];
+    }
+    return null;
+  }
+
+  // Devuelve { ruta, proveedor, etiqueta, bot?, plataforma? }.
+  //   cfg.modoCodigo   { storetools: "telegram"|"directo", kh: "telegram"|"directo" }
+  //   cfg.storetoolsId ID de consulta de Storetools (sin él no hay directo)
+  //   cfg.fcmSlug      empresa en FastCodeManager (sin él no hay directo de KH)
+  //   cfg.tgBotKh / tgBotWolf / tgBotStore  handles de los bots
+  function rutaCodigo(acc, cfg) {
+    cfg = cfg || {};
+    var modo = cfg.modoCodigo || {};
+    var proveedor = proveedorDe(acc);
+    var plataforma = plataformaStoretools(acc);
+
+    if (proveedor === "netflix-elixir") {
+      // Solo directo: el buzón propio es instantáneo y no tiene interruptor.
+      return { ruta: "directo", proveedor: proveedor, etiqueta: "📬 Ver código (correo)" };
+    }
+    if (proveedor === "storetools") {
+      if (modo.storetools === "directo" && String(cfg.storetoolsId || "").trim()) {
+        return { ruta: "directo", proveedor: proveedor, plataforma: plataforma, etiqueta: "📬 Ver código (Storetools)" };
+      }
+      return { ruta: "telegram", proveedor: proveedor, plataforma: plataforma,
+               bot: cfg.tgBotStore || "CodigosTV_bot", etiqueta: "📨 Pedir código (Telegram)" };
+    }
+    if (proveedor === "kh") {
+      if (modo.kh === "directo" && String(cfg.fcmSlug || "").trim()) {
+        return { ruta: "directo", proveedor: proveedor, plataforma: plataforma, etiqueta: "📬 Ver código (KH)" };
+      }
+      return { ruta: "telegram", proveedor: proveedor, bot: cfg.tgBotKh || "userdkh_bot", etiqueta: "📨 Pedir código (Telegram)" };
+    }
+    // Wolf y cualquier otro: todavía no hay endpoint, Telegram siempre.
+    return { ruta: "telegram", proveedor: proveedor, bot: cfg.tgBotWolf || "WolfStr_bot", etiqueta: "📨 Pedir código (Telegram)" };
+  }
+
   window.__elixirUtils = {
     VERSION: VERSION,
 
@@ -650,5 +761,13 @@
     copiar: copiar,
     aviso: aviso,
     decodificarPin: decodificarPin,
+
+    esNetflix: esNetflix,
+    nombreProveedor: nombreProveedor,
+    proveedorDe: proveedorDe,
+    plataformaStoretools: plataformaStoretools,
+    plataformaPorId: plataformaPorId,
+    PLATAFORMAS_STORETOOLS: PLATAFORMAS_STORETOOLS,
+    rutaCodigo: rutaCodigo,
   };
 })();

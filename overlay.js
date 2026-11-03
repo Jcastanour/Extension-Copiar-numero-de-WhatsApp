@@ -273,6 +273,12 @@
       .codigo small { color:#cbd5e1; font-weight:400; }
       .codigo .ccopy { background:rgba(255,255,255,.16); border:none; color:#fff; border-radius:6px; padding:3px 8px; font-size:11.5px; cursor:pointer; }
       .codigo .copiado-ok { color:#34d399; font-size:11px; font-weight:600; }
+      /* Selector de plataforma (Storetools) o servicio (KH) cuando el tipo de
+         cuenta no casa con ninguno conocido. */
+      .elegir { display:flex; gap:6px; margin-top:6px; }
+      .elegir select { flex:1; min-width:0; font:inherit; font-size:12px; border:1px solid #e7e7ef; border-radius:7px; padding:5px 6px; background:#fff; color:#1e1b2e; }
+      .elegir button { background:#635bff; color:#fff; border:none; border-radius:7px; padding:5px 10px; font-size:12px; font-weight:600; cursor:pointer; }
+      .msg small { display:block; margin-top:3px; color:#9ca3af; }
 
       /* Modal para teclear el número cuando WhatsApp no lo expone */
       .modal-fondo {
@@ -456,47 +462,38 @@
   let state = "bubble";
   let overlayEnabled = true;      // el flotante siempre activo (se apaga desde el popup)
   let forma = "burbuja";          // "burbuja" | "barra" (Ajustes)
-  let tgEnabled = true;           // Telegram encendido por defecto (se apaga en Ajustes)
-  let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
-  let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
+  let tgEnabled = true;             // Telegram encendido por defecto (se apaga en Ajustes)
+  let tgBotKh = "userdkh_bot";      // bot DigitalKH (Disney)
+  let tgBotWolf = "WolfStr_bot";    // bot Andres / Wolf
+  let tgBotStore = "CodigosTV_bot"; // bot de Storetools (ProveedorYT)
+  let modoCodigo = {};              // por proveedor: "telegram" (defecto) | "directo"
+  let storetoolsId = "";            // ID de consulta de Storetools (aquí solo importa si está)
+  let fcmSlug = "digital-kh";       // empresa en FastCodeManager (KH)
 
-  // Decide a qué bot pedir el código según la cuenta. El backend manda el NOMBRE
-  // del proveedor (ej. "Digital KH", "Andrés"); aquí lo mapeamos al bot. Si no
-  // viene proveedor o es uno sin bot (ProveedorYT, Elixir…), fallback por is_disney.
-  function botParaCuenta(acc) {
-    // Normaliza: quita acentos y pasa a minúsculas ("Andrés" -> "andres").
-    const prov = (acc.provider || acc.provider_name || acc.proveedor || "")
-      .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    let bot = acc.is_disney ? tgBotKh : tgBotWolf; // fallback
-    if (prov) {
-      if (/kh|digital/.test(prov)) bot = tgBotKh;         // Digital KH
-      else if (/wolf|andres/.test(prov)) bot = tgBotWolf; // Andrés
-    }
-    return bot;
-  }
-  // ¿Cuenta de Netflix? Basta con que el nombre o la categoría contengan
-  // "netflix", para que entren todas las variantes del catálogo (Exterior, Cel,
-  // NR / No Renovable, Extra…). Mismo criterio que _is_disney() en el backend.
-  function esNetflix(acc) {
-    const txt = ((acc.account_type_name || "") + " " + (acc.category || ""))
-      .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    return txt.indexOf("netflix") !== -1;
+  // Lo que necesita rutaCodigo() (numero-utils.js) para decidir por dónde va el
+  // código de cada cuenta. La decisión vive allí: popup y overlay la comparten.
+  function cfgCodigo() {
+    return { modoCodigo, storetoolsId, fcmSlug, tgBotKh, tgBotWolf, tgBotStore };
   }
 
-  // Netflix se resuelve leyendo el buzón central: instantáneo y sin salir de
-  // WhatsApp. Los demás proveedores no están soportados ahí y siguen por Telegram.
+  // Un solo botón por tarjeta: endpoint directo o bot de Telegram, según el
+  // interruptor del proveedor en Ajustes. Telegram puede apagarse del todo.
   function botonCodigo(acc, email) {
     if (!email) return "";
-    if (esNetflix(acc)) {
-      return `<button class="pedir correo" data-email="${email}">📬 Ver código (correo)</button>`;
+    const r = utils.rutaCodigo(acc, cfgCodigo());
+    if (r.ruta === "directo") {
+      const plat = r.plataforma ? escapeHtml(r.plataforma.id) : "";
+      return `<button class="pedir directo" data-email="${email}" data-proveedor="${r.proveedor}" data-plataforma="${plat}">${r.etiqueta}</button>`;
     }
     if (!tgEnabled) return "";
-    return `<button class="pedir" data-email="${email}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>`;
+    // Para el bot de Storetools viaja el NOMBRE del botón de su menú ("Disney+").
+    const nombrePlat = r.plataforma ? escapeHtml(r.plataforma.nombre) : "";
+    return `<button class="pedir" data-email="${email}" data-proveedor="${r.proveedor}" data-bot="${escapeHtml(r.bot)}" data-plat-nombre="${nombrePlat}">${r.etiqueta}</button>`;
   }
 
   // Nombre del proveedor para mostrar en la tarjeta (badge).
   function nombreProveedor(acc) {
-    return acc.provider || acc.provider_name || acc.proveedor || "";
+    return utils.nombreProveedor(acc);
   }
   let buscando = false;         // evita búsquedas concurrentes
   let firmaActual = null;       // firma del chat abierto AHORA
@@ -1185,13 +1182,16 @@
 
     shadow.querySelectorAll(".pedir").forEach((btn) => {
       btn.addEventListener("click", () =>
-        btn.classList.contains("correo") ? pedirCodigoCorreo(btn) : pedirCodigo(btn)
+        btn.classList.contains("directo") ? pedirCodigoDirecto(btn) : pedirCodigo(btn)
       );
     });
   }
 
-  // ----- Netflix: código leído del buzón central, sin abrir Telegram -----
-  function pedirCodigoCorreo(btn) {
+  // ----- Ruta directa: Netflix (buzón propio), Storetools y KH -----
+  // Una petición al background y listo, sin abrir Telegram. El background
+  // despacha por `proveedor`; aquí solo se pinta lo que vuelve. `extra` trae la
+  // plataforma o el servicio elegidos a mano cuando el tipo no se reconoció.
+  function pedirCodigoDirecto(btn, extra) {
     const email = btn.getAttribute("data-email");
     if (!email) return;
     const slot = btn.parentElement.querySelector(".codigo-slot");
@@ -1199,42 +1199,87 @@
     btn.disabled = true;
     btn.textContent = "Buscando…";
 
-    chrome.runtime.sendMessage({ type: "codigo-correo", correo: email }, (resp) => {
+    const p = utils.plataformaPorId(btn.getAttribute("data-plataforma") || "");
+    const msg = {
+      type: "codigo-directo",
+      proveedor: btn.getAttribute("data-proveedor") || "netflix-elixir",
+      correo: email,
+      plataforma: p ? { id: p.id, num: p.num, nombre: p.nombre } : null,
+      ...(extra || {}),
+    };
+    chrome.runtime.sendMessage(msg, (resp) => {
       btn.disabled = false;
       btn.textContent = original;
       if (chrome.runtime.lastError) {
         if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`;
         return;
       }
-      if (!resp || !resp.ok) {
-        if (slot) slot.innerHTML = `<div class="msg error">${escapeHtml((resp && resp.error) || "No se pudo consultar.")}</div>`;
-        return;
-      }
+      pintarResultadoDirecto(slot, resp, (eleccion) => pedirCodigoDirecto(btn, eleccion));
+    });
+  }
 
-      // Perfil y dispositivo: para comprobar que el código es del cliente que escribe.
-      const quien = [resp.perfil, resp.dispositivo].filter(Boolean).map(escapeHtml).join(" · ");
-      const pie = quien ? `<div class="num">${quien}</div>` : "";
+  function pintarResultadoDirecto(slot, resp, reenviar) {
+    if (!slot) return;
+    if (!resp || !resp.ok) {
+      const error = escapeHtml((resp && resp.error) || "No se pudo consultar.");
+      // Storetools mide las consultas: se dice cuándo reintentar, no se reintenta solo.
+      const espera = resp && typeof resp.reintentarEn === "number" && resp.reintentarEn > 0
+        ? `<small>Puedes reintentar en ${resp.reintentarEn} s.</small>` : "";
+      slot.innerHTML = `<div class="msg error">${error}${espera}</div>`;
+      if (resp && (resp.elegirPlataforma || resp.elegirServicio)) pintarSelector(slot, resp, reenviar);
+      return;
+    }
 
-      if (resp.codigo) {
-        slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>${pie}`;
-        slot.querySelector(".ccopy").addEventListener("click", async (e) => {
-          await copiar(resp.codigo);
-          e.target.textContent = "✓";
-          setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
-        });
-        copiar(resp.codigo);
-        return;
-      }
+    // De quién es el código (perfil/dispositivo en Netflix, plataforma y asunto
+    // en los otros): para no entregarle a un cliente el de otro.
+    const quien = [resp.perfil, resp.dispositivo, resp.plataforma, resp.asunto]
+      .filter(Boolean).map(escapeHtml).join(" · ");
+    const pie = quien ? `<div class="num">${quien}</div>` : "";
 
-      if (resp.link) {
-        // No se abre solo: el de hogar confirma el cambio al pulsarlo y el de
-        // viaje es de un solo uso. Lo abre el operador cuando corresponde.
-        slot.innerHTML = `<div class="codigo"><span>${resp.tipo === "household" ? "Confirmar hogar" : "Enlace"}</span><button class="ccopy">Abrir</button></div>${pie}`;
-        slot.querySelector(".ccopy").addEventListener("click", () => window.open(resp.link, "_blank"));
-        return;
-      }
+    if (resp.codigo) {
+      slot.innerHTML = `<div class="codigo"><span>Código: <b>${escapeHtml(resp.codigo)}</b></span><button class="ccopy">Copiar</button></div>${pie}`;
+      slot.querySelector(".ccopy").addEventListener("click", async (e) => {
+        await copiar(resp.codigo);
+        e.target.textContent = "✓";
+        setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
+      });
+      copiar(resp.codigo);
+      return;
+    }
 
-      slot.innerHTML = `<div class="msg">Llegó un correo pero sin código utilizable.</div>`;
+    if (resp.link) {
+      // No se abre solo: el de hogar confirma el cambio al pulsarlo y el de
+      // viaje es de un solo uso. Lo abre el operador cuando corresponde.
+      slot.innerHTML = `<div class="codigo"><span>${resp.tipo === "household" ? "Confirmar hogar" : "Enlace"}</span><button class="ccopy">Abrir</button></div>${pie}`;
+      slot.querySelector(".ccopy").addEventListener("click", () => window.open(resp.link, "_blank"));
+      return;
+    }
+
+    slot.innerHTML = `<div class="msg">Llegó un correo pero sin código utilizable.</div>${pie}`;
+  }
+
+  // Selector de plataforma (Storetools) o de servicio (KH) cuando el tipo de
+  // cuenta no casa con ninguno conocido. Adivinar da "no registra", que engaña.
+  function pintarSelector(slot, resp, reenviar) {
+    const opciones = resp.elegirServicio
+      ? resp.elegirServicio.map((x) => ({ valor: x.id, texto: x.nombre }))
+      : utils.PLATAFORMAS_STORETOOLS.map((x) => ({ valor: x.id, texto: x.nombre }));
+    const sel = document.createElement("select");
+    opciones.forEach((o) => {
+      const op = document.createElement("option");
+      op.value = o.valor; op.textContent = o.texto;
+      sel.appendChild(op);
+    });
+    const ok = document.createElement("button");
+    ok.textContent = "Consultar";
+    const caja = document.createElement("div");
+    caja.className = "elegir";
+    caja.appendChild(sel); caja.appendChild(ok);
+    slot.appendChild(caja);
+    ok.addEventListener("click", () => {
+      if (resp.elegirServicio) { reenviar({ servicioId: sel.value }); return; }
+      const p = utils.plataformaPorId(sel.value);
+      reenviar({ plataforma: p ? { id: p.id, num: p.num, nombre: p.nombre } : null });
     });
   }
 
@@ -1258,7 +1303,9 @@
     if (slot) slot.innerHTML = "";
 
     const bot = btn.getAttribute("data-bot") || tgBotWolf;
-    chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot }, (resp) => {
+    const proveedor = btn.getAttribute("data-proveedor") || null;
+    const plataforma = btn.getAttribute("data-plat-nombre") || null;
+    chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot, proveedor, plataforma }, (resp) => {
       btn.disabled = false;
       btn.textContent = orig;
       if (chrome.runtime.lastError) { if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`; return; }
@@ -1273,6 +1320,9 @@
           e.target.textContent = "✓";
           setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
         });
+      } else if (resp.link) {
+        slot.innerHTML = `<div class="codigo"><span>Enlace</span><button class="ccopy">Abrir</button></div>`;
+        slot.querySelector(".ccopy").addEventListener("click", () => window.open(resp.link, "_blank"));
       } else {
         slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 80))}${nota}</small></div>`;
       }
@@ -1569,7 +1619,8 @@
   // ----- Init -----
   try {
     chrome.storage.local.get(
-      ["overlayState", "overlayEnabled", "overlayForma", "overlayPos", "tgEnabled", "tgBotKh", "tgBotWolf"],
+      ["overlayState", "overlayEnabled", "overlayForma", "overlayPos", "tgEnabled", "tgBotKh", "tgBotWolf",
+       "tgBotStore", "modoCodigo", "storetoolsId", "fcmSlug"],
       (cfg) => {
         // Migración: quien pulsó la ✕ en una versión anterior tiene guardado
         // "hidden" y, sin esto, seguiría sin ver el flotante después de
@@ -1593,6 +1644,10 @@
         if (cfg && typeof cfg.tgEnabled === "boolean") tgEnabled = cfg.tgEnabled;
         if (cfg && typeof cfg.tgBotKh === "string" && cfg.tgBotKh.trim()) tgBotKh = cfg.tgBotKh.trim().replace(/^@/, "");
         if (cfg && typeof cfg.tgBotWolf === "string" && cfg.tgBotWolf.trim()) tgBotWolf = cfg.tgBotWolf.trim().replace(/^@/, "");
+        if (cfg && typeof cfg.tgBotStore === "string" && cfg.tgBotStore.trim()) tgBotStore = cfg.tgBotStore.trim().replace(/^@/, "");
+        if (cfg && cfg.modoCodigo && typeof cfg.modoCodigo === "object") modoCodigo = cfg.modoCodigo;
+        if (cfg && typeof cfg.storetoolsId === "string") storetoolsId = cfg.storetoolsId.trim();
+        if (cfg && typeof cfg.fcmSlug === "string") fcmSlug = cfg.fcmSlug.trim();
         arrancar();
       }
     );
@@ -1638,9 +1693,14 @@
       if (changes.tgEnabled) tgEnabled = !!changes.tgEnabled.newValue;
       if (changes.tgBotKh && typeof changes.tgBotKh.newValue === "string") tgBotKh = changes.tgBotKh.newValue.trim().replace(/^@/, "") || tgBotKh;
       if (changes.tgBotWolf && typeof changes.tgBotWolf.newValue === "string") tgBotWolf = changes.tgBotWolf.newValue.trim().replace(/^@/, "") || tgBotWolf;
+      if (changes.tgBotStore && typeof changes.tgBotStore.newValue === "string") tgBotStore = changes.tgBotStore.newValue.trim().replace(/^@/, "") || tgBotStore;
+      if (changes.modoCodigo) modoCodigo = (changes.modoCodigo.newValue && typeof changes.modoCodigo.newValue === "object") ? changes.modoCodigo.newValue : {};
+      if (changes.storetoolsId) storetoolsId = String(changes.storetoolsId.newValue || "").trim();
+      if (changes.fcmSlug) fcmSlug = String(changes.fcmSlug.newValue == null ? "" : changes.fcmSlug.newValue).trim();
       // Los botones de código dependen de estos ajustes: hay que repintar. Los
       // datos siguen siendo válidos, así que se repinta sin volver a consultar.
-      if (changes.tgEnabled || changes.tgBotKh || changes.tgBotWolf) pintarPanel();
+      if (changes.tgEnabled || changes.tgBotKh || changes.tgBotWolf || changes.tgBotStore ||
+          changes.modoCodigo || changes.storetoolsId || changes.fcmSlug) pintarPanel();
     });
   } catch (e) {}
 })();

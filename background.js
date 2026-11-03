@@ -1,3 +1,7 @@
+// Extractor de códigos a partir del HTML de un correo (Storetools no manda el
+// código, manda el correo entero). Vive aparte para poder probarlo en Node.
+importScripts("codigo-html.js");
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("WhatsApp Contact Extension Installed");
 });
@@ -104,6 +108,186 @@ function mensajeDeErrorCodigo(data) {
 }
 
 // ---------------------------------------------------------------------------
+// Códigos de Storetools (cuentas de ProveedorYT): POST storetools.co/api/consultar.
+// Es el mismo servicio al que pregunta el bot de Telegram, sin pasar por él.
+// Contrato (2 nov 2026): el cuerpo lleva la plataforma (id + número), el correo
+// y el ID de consulta del operador; la respuesta trae `respuesta` ("exito",
+// "sin_correos", "sesion", "caducado"…) y, si hubo suerte, `resultadoCorreos`
+// con el correo ENTERO en HTML (`mensaje`), sin campo de código: se extrae aquí.
+// Las consultas están medidas (existe "caducado"), así que no se reintenta solo.
+// ---------------------------------------------------------------------------
+const STORETOOLS_URL = "https://storetools.co/api/consultar";
+
+async function codigoStoretools(correo, plataforma) {
+  const { storetoolsId } = await chrome.storage.local.get(["storetoolsId"]);
+  const id = String(storetoolsId || "").trim();
+  if (!id) return { ok: false, error: "Falta el ID de consulta de Storetools (⚙️ Ajustes)." };
+  if (!plataforma || !plataforma.id) {
+    return { ok: false, error: "No sé a qué plataforma de Storetools corresponde este tipo de cuenta.", elegirPlataforma: true };
+  }
+
+  let resp;
+  try {
+    resp = await fetch(STORETOOLS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plataforma: plataforma.id,
+        idPlataforma: String(plataforma.num),
+        correoConsultar: correo,
+        modo: "correo",
+        tipoConsulta: "correo",
+        token: null,
+        idUsuarioConsulta: id,
+        language: "es",
+      }),
+    });
+  } catch (e) {
+    return { ok: false, error: "Sin conexión con Storetools." };
+  }
+  if (!resp.ok) return { ok: false, error: `Error de Storetools (HTTP ${resp.status}).` };
+
+  let data;
+  try { data = await resp.json(); } catch (e) { return { ok: false, error: "Respuesta inválida de Storetools." }; }
+
+  const r = data && (data.respuesta || data.status);
+  const mensaje = (data && data.mensaje) || "";
+  const correos = Array.isArray(data && data.resultadoCorreos) ? data.resultadoCorreos : [];
+
+  if (r === "exito" && correos.length) {
+    const c = correos[0]; // el más reciente
+    const ex = self.__elixirCodigoHtml.extraerCodigoDeHtml(c.mensaje);
+    return {
+      ok: true,
+      codigo: ex.codigo,
+      link: ex.link,
+      asunto: c.asunto || null,
+      fecha: c.fecha || null,
+      de: c.de || null,
+      plataforma: plataforma.nombre || plataforma.id,
+    };
+  }
+  if (r === "exito" || r === "sin_correos") {
+    const faltan = data.cacheInfo && typeof data.cacheInfo.remaining === "number" ? data.cacheInfo.remaining : null;
+    return { ok: false, error: "No llegó ningún correo reciente para esta cuenta.", reintentarEn: faltan };
+  }
+  if (r === "sesion") return { ok: false, error: "Storetools pide autorización: revisa el ID de consulta (⚙️ Ajustes)." };
+  if (r === "caducado") return { ok: false, error: mensaje || "Plan de Storetools caducado o límite de consultas superado." };
+  // "no registra" suele ser plataforma equivocada, no cuenta inexistente: se
+  // ofrece elegir otra en vez de dar la consulta por perdida.
+  const malaPlataforma = /no registra|no existe|cuenta no|plataforma/i.test(mensaje);
+  return { ok: false, error: mensaje || "Storetools no pudo procesar la consulta.", elegirPlataforma: malaPlataforma };
+}
+
+// ---------------------------------------------------------------------------
+// Códigos de Digital KH: api.fastcodemanager.com. A diferencia de Storetools,
+// este ya devuelve el código extraído (`data.code`) o un enlace (`data.link`),
+// y el listado de servicios es público, así que los ids no se queman aquí: se
+// leen y se casan por nombre ("Prime Video", "HBO max", "Crunchyrroll" —sic—).
+// ---------------------------------------------------------------------------
+const FCM_URL = "https://api.fastcodemanager.com";
+const FCM_SLUG_DEFECTO = "digital-kh";
+const FCM_CACHE_MS = 10 * 60 * 1000;
+let fcmServicios = { slug: null, ts: 0, items: [] };
+
+// Palabra clave por plataforma (mismos ids que PLATAFORMAS_STORETOOLS en
+// numero-utils.js) para casar con el nombre del servicio en KH.
+const KH_PALABRAS = {
+  netflix: /netflix/i, disney: /disney/i, prime: /prime|amazon/i, max: /\bmax\b|hbo/i,
+  spotify: /spotify/i, paramount: /paramount/i, vix: /\bvix\b/i, crunchyroll: /crunchy/i,
+  chatgpt: /chatgpt|openai/i, universal: /universal/i, appletv: /apple/i, foxone: /\bfox\b/i,
+};
+
+async function serviciosKh(slug) {
+  const vivo = fcmServicios.slug === slug && fcmServicios.items.length && Date.now() - fcmServicios.ts < FCM_CACHE_MS;
+  if (vivo) return fcmServicios.items;
+  const resp = await fetch(`${FCM_URL}/enterprise/${encodeURIComponent(slug)}/services`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  // Forma real (2 nov 2026): { success, data: { companyName, services: [...] } }.
+  // Se aceptan también una lista a secas o data como lista, por si cambia.
+  const d = data && data.data;
+  const items = Array.isArray(data) ? data
+    : Array.isArray(d) ? d
+    : (d && Array.isArray(d.services)) ? d.services
+    : [];
+  if (!items.length) throw new Error("listado vacío");
+  fcmServicios = { slug, ts: Date.now(), items };
+  return items;
+}
+
+// KH manda la fecha en ISO ("2026-11-03T00:27:09Z"); en la tarjeta se lee mejor
+// en hora local. Si no se puede interpretar, se deja tal cual.
+function fechaLegible(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  try { return d.toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" }); }
+  catch (e) { return d.toLocaleString(); }
+}
+
+async function codigoKh(correo, plataforma, servicioId) {
+  const { fcmSlug } = await chrome.storage.local.get(["fcmSlug"]);
+  const slug = String(fcmSlug || FCM_SLUG_DEFECTO).trim();
+
+  let items;
+  try { items = await serviciosKh(slug); }
+  catch (e) { return { ok: false, error: "No pude leer los servicios de KH (FastCodeManager)." }; }
+  const activos = items.filter((s) => s && s.enabled !== false);
+
+  let servicio = null;
+  if (servicioId) servicio = activos.find((s) => s.id === servicioId) || null;
+  else if (plataforma && KH_PALABRAS[plataforma.id]) servicio = activos.find((s) => KH_PALABRAS[plataforma.id].test(s.name || "")) || null;
+
+  if (!servicio) {
+    return {
+      ok: false,
+      error: plataforma ? `KH no tiene servicio para ${plataforma.nombre || plataforma.id}.` : "No sé qué servicio de KH corresponde a este tipo de cuenta.",
+      elegirServicio: activos.map((s) => ({ id: s.id, nombre: s.name })),
+    };
+  }
+
+  let resp;
+  try {
+    resp = await fetch(`${FCM_URL}/enterprise/${encodeURIComponent(slug)}/lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serviceId: servicio.id, recipientEmail: correo }),
+    });
+  } catch (e) {
+    return { ok: false, error: "Sin conexión con KH (FastCodeManager)." };
+  }
+  if (!resp.ok) return { ok: false, error: `Error de KH (HTTP ${resp.status}).` };
+
+  let data;
+  try { data = await resp.json(); } catch (e) { return { ok: false, error: "Respuesta inválida de KH." }; }
+  if (!data || !data.success) return { ok: false, error: (data && (data.message || data.error)) || "KH no pudo procesar la consulta." };
+
+  const d = data.data || {};
+  if (d.registered === false) return { ok: false, error: "Ese correo no está registrado en KH." };
+  if (!d.found) return { ok: false, error: "No llegó ningún código reciente para esta cuenta." };
+  return {
+    ok: true,
+    codigo: d.code || null,
+    link: d.link || null,
+    asunto: d.subject || null,
+    fecha: fechaLegible(d.date),
+    plataforma: servicio.name,
+  };
+}
+
+// Un solo mensaje para todas las rutas directas; quién es el proveedor lo
+// decide numero-utils.js (rutaCodigo) en el overlay/popup.
+function codigoDirecto(msg) {
+  switch (msg.proveedor) {
+    case "netflix-elixir": return codigoPorCorreo(msg.correo);
+    case "storetools": return codigoStoretools(msg.correo, msg.plataforma || null);
+    case "kh": return codigoKh(msg.correo, msg.plataforma || null, msg.servicioId || null);
+    default: return Promise.resolve({ ok: false, error: "Este proveedor todavía no tiene endpoint directo." });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PROTOTIPO Telegram (Bloque 2, detrás de flag): el overlay manda el correo,
 // aquí localizamos la pestaña de Telegram Web y reenviamos la orden al content
 // script telegram.js, que pega/envía y lee el código. Devolvemos el código.
@@ -165,8 +349,8 @@ function botDeUrl(url) {
 
 // Manda la orden al content script (con retry de inyección si el script no está).
 // `switchTo` = handle del bot al que cambiar por el buscador (null si ya estamos).
-async function enviarATelegram(tabId, correo, handle, switchTo) {
-  const msg = { type: "tg-enviar", correo, bot: handle, switchTo: switchTo || null };
+async function enviarATelegram(tabId, correo, handle, switchTo, opciones) {
+  const msg = { type: "tg-enviar", correo, bot: handle, switchTo: switchTo || null, ...(opciones || {}) };
   try {
     return await chrome.tabs.sendMessage(tabId, msg);
   } catch (e) {
@@ -198,8 +382,19 @@ function navegarABot(tabId, handle) {
   });
 }
 
-async function pedirCodigoTelegram(correo, bot, sender) {
+// `opciones`: { proveedor, plataforma } del overlay. El bot de Storetools pide
+// elegir plataforma y, a veces, un ID de consulta; ese ID se lee aquí de los
+// ajustes para que nunca viaje por la página de WhatsApp.
+async function pedirCodigoTelegram(correo, bot, sender, opciones) {
   const handle = (bot || "WolfStr_bot").replace(/^@/, "");
+  opciones = opciones || {};
+  const extra = { plataforma: opciones.plataforma || null, idConsulta: null };
+  if (opciones.proveedor === "storetools") {
+    try {
+      const { storetoolsId } = await chrome.storage.local.get(["storetoolsId"]);
+      extra.idConsulta = String(storetoolsId || "").trim() || null;
+    } catch (e) {}
+  }
 
   // Localiza o abre la pestaña de Telegram. Decidimos si hace falta cambiar de bot
   // leyendo la URL real (ground-truth del bot abierto), no una suposición.
@@ -221,7 +416,7 @@ async function pedirCodigoTelegram(correo, bot, sender) {
 
   let resp;
   try {
-    resp = await enviarATelegram(tab.id, correo, handle, switchTo);
+    resp = await enviarATelegram(tab.id, correo, handle, switchTo, extra);
   } catch (e) {
     return { ok: false, error: "No pude activar el script en Telegram (recarga la pestaña)." };
   }
@@ -236,7 +431,7 @@ async function pedirCodigoTelegram(correo, bot, sender) {
       return { ok: false, error: "Telegram tardó en cargar, reintenta." };
     }
     try {
-      resp = await enviarATelegram(tab.id, correo, handle, null);
+      resp = await enviarATelegram(tab.id, correo, handle, null, extra);
     } catch (e) {
       return { ok: false, error: "No pude activar el script en Telegram (recarga la pestaña)." };
     }
@@ -263,11 +458,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // respuesta asíncrona
   }
   if (msg && msg.type === "tg-pedir-codigo" && typeof msg.correo === "string") {
-    pedirCodigoTelegram(msg.correo, msg.bot, sender).then(sendResponse).catch((err) =>
+    pedirCodigoTelegram(msg.correo, msg.bot, sender, { proveedor: msg.proveedor, plataforma: msg.plataforma }).then(sendResponse).catch((err) =>
       sendResponse({ ok: false, error: String(err) })
     );
     return true; // respuesta asíncrona
   }
+  if (msg && msg.type === "codigo-directo" && typeof msg.correo === "string") {
+    codigoDirecto(msg).then(sendResponse).catch((err) =>
+      sendResponse({ ok: false, error: String(err) })
+    );
+    return true; // respuesta asíncrona
+  }
+  // Nombre viejo del mensaje de Netflix: una pestaña de WhatsApp abierta durante
+  // la actualización sigue con el content script anterior un rato.
   if (msg && msg.type === "codigo-correo" && typeof msg.correo === "string") {
     codigoPorCorreo(msg.correo).then(sendResponse).catch((err) =>
       sendResponse({ ok: false, error: String(err) })

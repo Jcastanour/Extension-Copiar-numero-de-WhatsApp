@@ -39,7 +39,11 @@ function hasChromeStorage() {
 function getConfig() {
   return new Promise((resolve) => {
     if (hasChromeStorage()) {
-      chrome.storage.local.get(["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "overlayEnabled", "overlayForma", "tgEnabled", "tgBotKh", "tgBotWolf"], (cfg) => resolve(cfg || {}));
+      chrome.storage.local.get(
+        ["baseUrl", "apiKey", "codigosUrl", "codigosApiKey", "overlayEnabled", "overlayForma",
+         "tgEnabled", "tgBotKh", "tgBotWolf", "tgBotStore", "modoCodigo", "storetoolsId", "fcmSlug"],
+        (cfg) => resolve(cfg || {})
+      );
     } else {
       resolve({
         baseUrl: localStorage.getItem("baseUrl") || "",
@@ -51,6 +55,10 @@ function getConfig() {
         tgEnabled: localStorage.getItem("tgEnabled") !== "false", // encendido salvo que se apague
         tgBotKh: localStorage.getItem("tgBotKh") || "",
         tgBotWolf: localStorage.getItem("tgBotWolf") || "",
+        tgBotStore: localStorage.getItem("tgBotStore") || "",
+        modoCodigo: (() => { try { return JSON.parse(localStorage.getItem("modoCodigo") || "{}"); } catch (e) { return {}; } })(),
+        storetoolsId: localStorage.getItem("storetoolsId") || "",
+        fcmSlug: localStorage.getItem("fcmSlug") || "",
       });
     }
   });
@@ -61,7 +69,7 @@ function setConfig(extra) {
     if (hasChromeStorage()) {
       chrome.storage.local.set(extra, resolve);
     } else {
-      Object.keys(extra).forEach((k) => localStorage.setItem(k, String(extra[k])));
+      Object.keys(extra).forEach((k) => localStorage.setItem(k, typeof extra[k] === "object" ? JSON.stringify(extra[k]) : String(extra[k])));
       resolve();
     }
   });
@@ -101,47 +109,38 @@ function textoDias(d) {
 
 // Telegram va encendido por defecto; solo se apaga si el usuario lo desmarca.
 let tgEnabled = true;
-let tgBotKh = "userdkh_bot";    // bot DigitalKH (Disney)
-let tgBotWolf = "WolfStr_bot";  // bot Andres / Wolf
+let tgBotKh = "userdkh_bot";      // bot DigitalKH (Disney)
+let tgBotWolf = "WolfStr_bot";    // bot Andres / Wolf
+let tgBotStore = "CodigosTV_bot"; // bot de Storetools (ProveedorYT)
+let modoCodigo = {};              // por proveedor: "telegram" (defecto) | "directo"
+let storetoolsId = "";            // ID de consulta de Storetools
+let fcmSlug = "digital-kh";       // empresa en FastCodeManager (KH)
 
-// Decide a qué bot pedir el código según la cuenta. El backend manda el NOMBRE
-// del proveedor (ej. "Digital KH", "Andrés"); aquí lo mapeamos al bot. Si no
-// viene proveedor o es uno sin bot (ProveedorYT, Elixir…), fallback por is_disney.
-function botParaCuenta(acc) {
-  // Normaliza: quita acentos y pasa a minúsculas ("Andrés" -> "andres").
-  const prov = (acc.provider || acc.provider_name || acc.proveedor || "")
-    .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  let bot = acc.is_disney ? tgBotKh : tgBotWolf; // fallback
-  if (prov) {
-    if (/kh|digital/.test(prov)) bot = tgBotKh;         // Digital KH
-    else if (/wolf|andres/.test(prov)) bot = tgBotWolf; // Andrés
-  }
-  return bot;
-}
-// ¿Es una cuenta de Netflix? Basta con que el nombre o la categoría contengan
-// "netflix": así entran todas las variantes del catálogo (Netflix Exterior,
-// Netflix Cel, Netflix NR / No Renovable, Netflix Extra…). Mismo criterio que
-// usa _is_disney() en el backend.
-function esNetflix(acc) {
-  const txt = ((acc.account_type_name || "") + " " + (acc.category || ""))
-    .toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  return txt.indexOf("netflix") !== -1;
+// La decisión de por dónde se pide el código vive en numero-utils.js
+// (rutaCodigo), compartida con el overlay. Aquí solo se pinta el botón.
+const utils = window.__elixirUtils;
+
+function cfgCodigo() {
+  return { modoCodigo, storetoolsId, fcmSlug, tgBotKh, tgBotWolf, tgBotStore };
 }
 
-// Netflix se resuelve leyendo el buzón (instantáneo). El resto de proveedores no
-// están soportados por ese servicio, así que siguen por Telegram.
+// Un solo botón por tarjeta: endpoint directo o bot de Telegram, según el
+// interruptor del proveedor en Ajustes. Telegram puede apagarse del todo.
 function botonCodigo(acc, email) {
   if (!email) return "";
-  if (esNetflix(acc)) {
-    return `<button class="pedir correo" data-email="${email}">📬 Ver código (correo)</button>`;
+  const r = utils.rutaCodigo(acc, cfgCodigo());
+  if (r.ruta === "directo") {
+    const plat = r.plataforma ? escapeHtml(r.plataforma.id) : "";
+    return `<button class="pedir directo" data-email="${email}" data-proveedor="${r.proveedor}" data-plataforma="${plat}">${r.etiqueta}</button>`;
   }
   if (!tgEnabled) return "";
-  return `<button class="pedir" data-email="${email}" data-bot="${escapeHtml(botParaCuenta(acc))}">📨 Pedir código (Telegram)</button>`;
+  const nombrePlat = r.plataforma ? escapeHtml(r.plataforma.nombre) : "";
+  return `<button class="pedir" data-email="${email}" data-proveedor="${r.proveedor}" data-bot="${escapeHtml(r.bot)}" data-plat-nombre="${nombrePlat}">${r.etiqueta}</button>`;
 }
 
 // Nombre del proveedor para mostrar en la tarjeta (badge).
 function nombreProveedor(acc) {
-  return acc.provider || acc.provider_name || acc.proveedor || "";
+  return utils.nombreProveedor(acc);
 }
 
 async function copiarTexto(texto) {
@@ -209,10 +208,10 @@ function renderCuentas(accounts) {
     });
   });
 
-  // Listeners de los botones de código: por correo (Netflix) o por Telegram.
+  // Listeners de los botones de código: endpoint directo o Telegram.
   document.querySelectorAll("#resultados .pedir").forEach((btn) => {
     btn.addEventListener("click", () =>
-      btn.classList.contains("correo") ? pedirCodigoCorreo(btn) : pedirCodigoTelegram(btn)
+      btn.classList.contains("directo") ? pedirCodigoDirecto(btn) : pedirCodigoTelegram(btn)
     );
   });
 
@@ -238,14 +237,18 @@ function pintarResultadoTG(slot, resp) {
       e.target.textContent = "✓";
       setTimeout(() => { e.target.textContent = "Copiar"; }, 1200);
     });
+  } else if (resp.link) {
+    slot.innerHTML = `<div class="codigo"><span>Enlace</span><button class="ccopy">Abrir</button></div>`;
+    slot.querySelector(".ccopy").addEventListener("click", () => chrome.tabs.create({ url: resp.link }));
   } else {
     slot.innerHTML = `<div class="codigo"><small>${escapeHtml((resp.texto || "Respondió sin código.").slice(0, 90))}${nota}</small></div>`;
   }
 }
 
-// Netflix: el código se lee del buzón central. Una petición y listo, sin abrir
-// Telegram ni salir de aquí.
-function pedirCodigoCorreo(btn) {
+// Ruta directa: Netflix (buzón propio), Storetools y KH. Una petición al
+// background y listo, sin abrir Telegram ni salir de aquí. `extra` trae la
+// plataforma o el servicio elegidos a mano cuando el tipo no se reconoció.
+function pedirCodigoDirecto(btn, extra) {
   const email = btn.getAttribute("data-email");
   if (!email) return;
   const slot = btn.parentElement.querySelector(".codigo-slot");
@@ -253,26 +256,40 @@ function pedirCodigoCorreo(btn) {
   btn.disabled = true;
   btn.textContent = "Buscando…";
 
-  chrome.runtime.sendMessage({ type: "codigo-correo", correo: email }, (resp) => {
+  const p = utils.plataformaPorId(btn.getAttribute("data-plataforma") || "");
+  const msg = {
+    type: "codigo-directo",
+    proveedor: btn.getAttribute("data-proveedor") || "netflix-elixir",
+    correo: email,
+    plataforma: p ? { id: p.id, num: p.num, nombre: p.nombre } : null,
+    ...(extra || {}),
+  };
+  chrome.runtime.sendMessage(msg, (resp) => {
     btn.disabled = false;
     btn.textContent = original;
     if (chrome.runtime.lastError) {
       if (slot) slot.innerHTML = `<div class="msg error">Error de extensión.</div>`;
       return;
     }
-    pintarResultadoCorreo(slot, resp);
+    pintarResultadoDirecto(slot, resp, (eleccion) => pedirCodigoDirecto(btn, eleccion));
   });
 }
 
-function pintarResultadoCorreo(slot, resp) {
+function pintarResultadoDirecto(slot, resp, reenviar) {
   if (!slot) return;
   if (!resp || !resp.ok) {
-    slot.innerHTML = `<div class="msg error">${escapeHtml((resp && resp.error) || "No se pudo consultar.")}</div>`;
+    const error = escapeHtml((resp && resp.error) || "No se pudo consultar.");
+    // Storetools mide las consultas: se dice cuándo reintentar, no se reintenta solo.
+    const espera = resp && typeof resp.reintentarEn === "number" && resp.reintentarEn > 0
+      ? `<small>Puedes reintentar en ${resp.reintentarEn} s.</small>` : "";
+    slot.innerHTML = `<div class="msg error">${error}${espera}</div>`;
+    if (resp && (resp.elegirPlataforma || resp.elegirServicio)) pintarSelector(slot, resp, reenviar);
     return;
   }
 
   // De quién es el código: evita entregarle a un cliente el de otro perfil.
-  const quien = [resp.perfil, resp.dispositivo].filter(Boolean).map(escapeHtml).join(" · ");
+  const quien = [resp.perfil, resp.dispositivo, resp.plataforma, resp.asunto]
+    .filter(Boolean).map(escapeHtml).join(" · ");
   const pie = quien ? `<div class="pin-nota">${quien}</div>` : "";
 
   if (resp.codigo) {
@@ -298,7 +315,32 @@ function pintarResultadoCorreo(slot, resp) {
     return;
   }
 
-  slot.innerHTML = `<div class="msg">Llegó un correo pero sin código utilizable.</div>`;
+  slot.innerHTML = `<div class="msg">Llegó un correo pero sin código utilizable.</div>${pie}`;
+}
+
+// Selector de plataforma (Storetools) o de servicio (KH) cuando el tipo de
+// cuenta no casa con ninguno conocido. Adivinar da "no registra", que engaña.
+function pintarSelector(slot, resp, reenviar) {
+  const opciones = resp.elegirServicio
+    ? resp.elegirServicio.map((x) => ({ valor: x.id, texto: x.nombre }))
+    : utils.PLATAFORMAS_STORETOOLS.map((x) => ({ valor: x.id, texto: x.nombre }));
+  const sel = document.createElement("select");
+  opciones.forEach((o) => {
+    const op = document.createElement("option");
+    op.value = o.valor; op.textContent = o.texto;
+    sel.appendChild(op);
+  });
+  const ok = document.createElement("button");
+  ok.textContent = "Consultar";
+  const caja = document.createElement("div");
+  caja.className = "elegir";
+  caja.appendChild(sel); caja.appendChild(ok);
+  slot.appendChild(caja);
+  ok.addEventListener("click", () => {
+    if (resp.elegirServicio) { reenviar({ servicioId: sel.value }); return; }
+    const p = utils.plataformaPorId(sel.value);
+    reenviar({ plataforma: p ? { id: p.id, num: p.num, nombre: p.nombre } : null });
+  });
 }
 
 function pedirCodigoTelegram(btn) {
@@ -312,7 +354,9 @@ function pedirCodigoTelegram(btn) {
   if (slot) slot.innerHTML = `<div class="msg"><small>Abriendo Telegram… el código queda en Telegram y en el portapapeles.</small></div>`;
 
   const bot = btn.getAttribute("data-bot") || tgBotWolf;
-  chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot }, (resp) => {
+  const proveedor = btn.getAttribute("data-proveedor") || null;
+  const plataforma = btn.getAttribute("data-plat-nombre") || null;
+  chrome.runtime.sendMessage({ type: "tg-pedir-codigo", correo: email, bot, proveedor, plataforma }, (resp) => {
     // Puede que el popup ya esté cerrado (no llega). Si sigue vivo, pintamos.
     btn.disabled = false;
     btn.textContent = original;
@@ -551,6 +595,20 @@ async function cargarConfigEnInputs() {
   document.getElementById("cfgTgEnabled").checked = tgEnabled;
   document.getElementById("cfgTgBotKh").value = cfg.tgBotKh || "";
   document.getElementById("cfgTgBotWolf").value = cfg.tgBotWolf || "";
+
+  // Cómo se pide el código, por proveedor. Telegram salvo que se haya elegido
+  // directo a propósito; el ID de Storetools nunca tiene valor por defecto.
+  if (cfg.tgBotStore && cfg.tgBotStore.trim()) tgBotStore = cfg.tgBotStore.trim().replace(/^@/, "");
+  modoCodigo = (cfg.modoCodigo && typeof cfg.modoCodigo === "object") ? cfg.modoCodigo : {};
+  storetoolsId = (cfg.storetoolsId || "").trim();
+  // Solo un string guardado (aunque esté vacío) pisa el default: quien nunca
+  // guardó Ajustes debe tener el directo de KH listo para encender.
+  if (typeof cfg.fcmSlug === "string") fcmSlug = cfg.fcmSlug.trim();
+  document.getElementById("cfgModoStoretools").value = modoCodigo.storetools === "directo" ? "directo" : "telegram";
+  document.getElementById("cfgModoKh").value = modoCodigo.kh === "directo" ? "directo" : "telegram";
+  document.getElementById("cfgStoretoolsId").value = storetoolsId;
+  document.getElementById("cfgTgBotStore").value = cfg.tgBotStore || "";
+  document.getElementById("cfgFcmSlug").value = typeof cfg.fcmSlug === "string" ? cfg.fcmSlug : fcmSlug;
 }
 
 async function guardarConfig() {
@@ -562,10 +620,26 @@ async function guardarConfig() {
   const tgEnabledNuevo = document.getElementById("cfgTgEnabled").checked;
   const tgBotKhNuevo = document.getElementById("cfgTgBotKh").value.trim().replace(/^@/, "");
   const tgBotWolfNuevo = document.getElementById("cfgTgBotWolf").value.trim().replace(/^@/, "");
+  const tgBotStoreNuevo = document.getElementById("cfgTgBotStore").value.trim().replace(/^@/, "");
+  const modoCodigoNuevo = {
+    storetools: document.getElementById("cfgModoStoretools").value === "directo" ? "directo" : "telegram",
+    kh: document.getElementById("cfgModoKh").value === "directo" ? "directo" : "telegram",
+    wolf: "telegram", // sin endpoint todavía
+  };
+  const storetoolsIdNuevo = document.getElementById("cfgStoretoolsId").value.trim();
+  const fcmSlugNuevo = document.getElementById("cfgFcmSlug").value.trim();
   tgEnabled = tgEnabledNuevo;
   if (tgBotKhNuevo) tgBotKh = tgBotKhNuevo;
   if (tgBotWolfNuevo) tgBotWolf = tgBotWolfNuevo;
-  await setConfig({ baseUrl, apiKey, codigosUrl, codigosApiKey, overlayForma: overlayFormaNueva, tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo });
+  if (tgBotStoreNuevo) tgBotStore = tgBotStoreNuevo;
+  modoCodigo = modoCodigoNuevo;
+  storetoolsId = storetoolsIdNuevo;
+  fcmSlug = fcmSlugNuevo;
+  await setConfig({
+    baseUrl, apiKey, codigosUrl, codigosApiKey, overlayForma: overlayFormaNueva,
+    tgEnabled: tgEnabledNuevo, tgBotKh: tgBotKhNuevo, tgBotWolf: tgBotWolfNuevo, tgBotStore: tgBotStoreNuevo,
+    modoCodigo: modoCodigoNuevo, storetoolsId: storetoolsIdNuevo, fcmSlug: fcmSlugNuevo,
+  });
   const estado = document.getElementById("cfgEstado");
   estado.textContent = "Guardado ✓";
   setTimeout(() => {

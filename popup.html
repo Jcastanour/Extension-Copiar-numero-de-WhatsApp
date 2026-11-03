@@ -222,6 +222,11 @@
     .codigo small { color: #cbd5e1; font-weight: 400; }
     .codigo .ccopy { background: rgba(255,255,255,.16); border: none; color: #fff; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
     .codigo .copiado-ok { color: #34d399; font-size: 11px; font-weight: 600; }
+    .msg small { display: block; margin-top: 3px; color: var(--muted); }
+    /* Selector de plataforma (Storetools) o servicio (KH) cuando el tipo no se reconoce. */
+    .elegir { display: flex; gap: 6px; margin-top: 6px; }
+    .elegir select { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 7px; background: #fff; }
+    .elegir button { background: var(--brand-grad); color: #fff; border: none; border-radius: 8px; padding: 6px 11px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 
     /* Ajustes */
     .ajustes-head {
@@ -378,6 +383,49 @@
       <label for="cfgTgBotWolf">Bot Andres / Wolf</label>
       <input type="text" id="cfgTgBotWolf" placeholder="WolfStr_bot" />
       <div class="hint">Usuario del bot (sin @) para las demás cuentas.</div>
+    </div>
+    <div class="field">
+      <label for="cfgTgBotStore">Bot Storetools (ProveedorYT)</label>
+      <input type="text" id="cfgTgBotStore" placeholder="CodigosTV_bot" />
+      <div class="hint">Usuario del bot (sin @) para las cuentas de ProveedorYT. Elige la plataforma y manda el ID solo.</div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+
+    <div class="field">
+      <label>🔀 Cómo pedir el código, por proveedor</label>
+      <div class="hint">Telegram es lo de siempre. "Endpoint directo" trae el código sin salir de WhatsApp; si falta lo que necesita, se usa Telegram igual.</div>
+    </div>
+    <div class="field">
+      <label for="cfgModoStoretools">ProveedorYT (Storetools)</label>
+      <select id="cfgModoStoretools">
+        <option value="telegram">Bot de Telegram</option>
+        <option value="directo">Endpoint directo</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="cfgStoretoolsId">ID de consulta Storetools</label>
+      <input type="password" id="cfgStoretoolsId" placeholder="tu ID de consulta" autocomplete="off" />
+      <div class="hint">El mismo ID que pide el bot. Se guarda solo en este navegador; el endpoint directo no funciona sin él.</div>
+    </div>
+    <div class="field">
+      <label for="cfgModoKh">Digital KH</label>
+      <select id="cfgModoKh">
+        <option value="telegram">Bot de Telegram</option>
+        <option value="directo">Endpoint directo</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="cfgFcmSlug">Empresa en FastCodeManager (KH)</label>
+      <input type="text" id="cfgFcmSlug" placeholder="digital-kh" />
+      <div class="hint">El tramo de la URL del portal de KH (fastcodemanager.com/enterprise/<b>digital-kh</b>). Vacío = solo Telegram.</div>
+    </div>
+    <div class="field">
+      <label for="cfgModoWolf">Andrés / Wolf</label>
+      <select id="cfgModoWolf" disabled>
+        <option value="telegram">Bot de Telegram</option>
+      </select>
+      <div class="hint">Sin endpoint todavía: siempre por Telegram.</div>
     </div>
 
     <div>

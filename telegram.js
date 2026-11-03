@@ -81,20 +81,29 @@
   }
   function extraerCodigo(texto) {
     if (!texto) return null;
+    // 0) El bot de Storetools: "🔑 Código / Enlace: 1999".
     // 1) "código/code …: 123 456" (admite separador). 2) bloque suelto 3-8 dígitos.
     const m =
+      texto.match(/c[oó]digo\s*\/\s*enlace\D{0,6}?(\d{3,8})\b/i) ||
       texto.match(/(?:c[oó]digo|code)\D{0,20}?(\d{3}[\s-]?\d{3}|\d{3,8})/i) ||
       texto.match(/\b(\d{3}[\s-]?\d{3}|\d{4,8})\b/);
     return m ? m[1].replace(/[\s-]/g, "") : null;
   }
+  // Un enlace en la respuesta (hogar, viaje): se devuelve para abrirlo a mano.
+  function extraerEnlace(texto) {
+    const m = (texto || "").match(/https?:\/\/[^\s<>"']+/);
+    return m ? m[0] : null;
+  }
   // Mensajes del bot que niegan/rechazan (sin código): se muestran tal cual.
   function esDenegacion(texto) {
-    return /no tienes autorizaci|no autorizado|no puedes usar|inv[aá]lid|no encontr|sin permiso/i.test(texto || "");
+    return /no tienes autorizaci|no autorizado|no puedes usar|inv[aá]lid|no encontr|sin permiso|no registra|aviso de consulta/i.test(texto || "");
   }
 
   // El timeout cuenta SOLO tiempo visible: mientras la pestaña está en segundo
   // plano el reloj se pausa (Chrome congela el render, no es justo descontarlo).
-  function esperarRespuestaBot(baseCount, timeout = 30000) {
+  // `ignorar`: burbujas intermedias del bot ("Consultando correos…") que no son
+  // la respuesta; se saltan y se sigue esperando.
+  function esperarRespuestaBot(baseCount, timeout = 30000, ignorar = null) {
     return new Promise((resolve) => {
       const container = getBubblesContainer();
       if (!container) { resolve({ ok: false, error: "No encontré el contenedor de mensajes." }); return; }
@@ -116,11 +125,12 @@
         for (let i = entrantes.length - 1; i >= baseCount; i--) {
           const texto = textoDeBurbuja(entrantes[i]);
           if (!texto) continue;
+          if (ignorar && ignorar.test(texto)) { LOG("burbuja intermedia, sigo esperando:", JSON.stringify(texto.slice(0, 60))); continue; }
           const codigo = extraerCodigo(texto);
           LOG("burbuja entrante nueva:", JSON.stringify(texto), "=> código:", codigo);
-          if (codigo) { finish({ ok: true, codigo, texto }); return; }
+          if (codigo) { finish({ ok: true, codigo, texto, link: extraerEnlace(texto) }); return; }
           // Hay respuesta pero sin código reconocible: devolver el texto igual.
-          finish({ ok: true, codigo: null, texto, denegado: esDenegacion(texto) });
+          finish({ ok: true, codigo: null, texto, link: extraerEnlace(texto), denegado: esDenegacion(texto) });
           return;
         }
       };
@@ -251,37 +261,21 @@
     return false;
   }
 
-  // ----- Flujo principal -----
-  // Si `switchTo` viene, cambiamos de bot por el buscador (sin recargar). Si no se
-  // puede, devolvemos needsReload y el background recarga la pestaña (fallback).
-  async function enviarYLeer(correo, switchTo) {
-    if (!esWebK) {
-      return { ok: false, error: "Abre Telegram en la versión K: web.telegram.org/k/" };
-    }
-
-    if (switchTo) {
-      const ok = await cambiarBotPorBusqueda(switchTo);
-      if (!ok) return { ok: false, needsReload: true };
-    }
-
+  // ----- Escribir y enviar -----
+  // El input recién cargado puede no estar listo: se reintenta hasta que el
+  // texto realmente quede escrito.
+  async function enviarTexto(texto) {
     const input = await waitFor(".input-message-container .input-field-input[contenteditable], .input-message-input, #editable-message-text", 8000) || getInput();
     if (!input) return { ok: false, error: "No encontré el campo de mensaje del chat." };
 
-    const baseCount = snapshotEntrantes();
-    LOG("burbujas entrantes antes de enviar:", baseCount);
-
-    // El input recién cargado puede no estar listo: reintentamos hasta que el
-    // correo realmente quede escrito.
     let escrito = false;
     for (let i = 0; i < 6; i++) {
-      escribirEnInput(input, correo);
+      escribirEnInput(input, texto);
       await sleep(250);
-      if (cleanInput(input) === correo) { escrito = true; break; }
+      if (cleanInput(input) === texto) { escrito = true; break; }
       LOG("input aún no listo, reintento de escritura", i + 1);
     }
-    if (!escrito) {
-      return { ok: false, error: "No pude escribir el correo en el input (DOM de Telegram cambió)." };
-    }
+    if (!escrito) return { ok: false, error: "No pude escribir en el input (DOM de Telegram cambió)." };
 
     const sendBtn = getSendButton();
     if (sendBtn) {
@@ -291,8 +285,93 @@
       LOG("no hallé .btn-send, intento Enter sintético");
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
     }
+    return { ok: true };
+  }
 
-    const r = await esperarRespuestaBot(baseCount, 30000);
+  // ----- Bots con menú (Storetools): elegir la plataforma antes del correo -----
+  // El bot de Storetools pide primero la plataforma con botones inline, luego
+  // el correo y, si la cuenta está protegida, un ID de consulta.
+  function normalizarEtiqueta(s) {
+    return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9+]/g, "");
+  }
+  // Botones inline de la ÚLTIMA burbuja entrante que los tenga. Un menú viejo
+  // puede estar caducado para el bot, así que no se rebusca más atrás.
+  function botonesDeMenu() {
+    const burbujas = document.querySelectorAll(".bubble.is-in");
+    for (let i = burbujas.length - 1; i >= 0; i--) {
+      const bs = burbujas[i].querySelectorAll(".reply-markup-button, button");
+      if (bs.length) return Array.from(bs);
+    }
+    return [];
+  }
+  function botonDePlataforma(nombre) {
+    const objetivo = normalizarEtiqueta(nombre);
+    return botonesDeMenu().find((b) => normalizarEtiqueta(b.textContent) === objetivo) || null;
+  }
+  async function elegirPlataforma(nombre) {
+    let btn = botonDePlataforma(nombre);
+    if (!btn) {
+      LOG("sin menú de plataformas a la vista, mando /start");
+      const r = await enviarTexto("/start");
+      if (!r.ok) return r;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 10000 && !(btn = botonDePlataforma(nombre))) await sleep(250);
+    }
+    if (!btn) return { ok: false, error: `El bot no ofrece la plataforma "${nombre}".` };
+    const base = snapshotEntrantes();
+    LOG("elijo plataforma", nombre);
+    clicReal(btn);
+    // Espera a que el bot pida el correo antes de escribirlo.
+    const t1 = Date.now();
+    while (Date.now() - t1 < 8000 && snapshotEntrantes() <= base) await sleep(200);
+    await sleep(300);
+    return { ok: true };
+  }
+
+  // Burbujas intermedias del bot de Storetools que no son la respuesta.
+  const RE_INTERMEDIO = /consultando correos|procesando consulta|recibido\. procesando/i;
+  // El bot pide el ID de consulta para cuentas protegidas.
+  const RE_PIDE_ID = /autorizaci[oó]n requerida|id de consulta/i;
+
+  // ----- Flujo principal -----
+  // Si `switchTo` viene, cambiamos de bot por el buscador (sin recargar). Si no se
+  // puede, devolvemos needsReload y el background recarga la pestaña (fallback).
+  // `opciones`: { plataforma, idConsulta } para bots con menú (Storetools).
+  async function enviarYLeer(correo, switchTo, opciones) {
+    opciones = opciones || {};
+    if (!esWebK) {
+      return { ok: false, error: "Abre Telegram en la versión K: web.telegram.org/k/" };
+    }
+
+    if (switchTo) {
+      const ok = await cambiarBotPorBusqueda(switchTo);
+      if (!ok) return { ok: false, needsReload: true };
+    }
+
+    if (opciones.plataforma) {
+      const e = await elegirPlataforma(opciones.plataforma);
+      if (!e.ok) return e;
+    }
+
+    let baseCount = snapshotEntrantes();
+    LOG("burbujas entrantes antes de enviar:", baseCount);
+    const env = await enviarTexto(correo);
+    if (!env.ok) return env;
+
+    let r = await esperarRespuestaBot(baseCount, 30000, RE_INTERMEDIO);
+
+    // Cuenta protegida: el bot pide el ID de consulta y después sí responde.
+    if (r && r.ok && !r.codigo && RE_PIDE_ID.test(r.texto || "")) {
+      if (!opciones.idConsulta) {
+        return { ok: false, error: "El bot pide el ID de consulta: ponlo en ⚙️ Ajustes (Storetools)." };
+      }
+      LOG("el bot pide ID de consulta, lo mando");
+      baseCount = snapshotEntrantes();
+      const e2 = await enviarTexto(opciones.idConsulta);
+      if (!e2.ok) return e2;
+      r = await esperarRespuestaBot(baseCount, 30000, RE_INTERMEDIO);
+    }
+
     // Copia SOLO el código (no mensajes de error/denegación).
     if (r && r.ok && r.codigo) {
       r.copiado = await copiarAlPortapapeles(r.codigo);
@@ -303,8 +382,8 @@
   // ----- Mensajería con el background -----
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.type === "tg-enviar" && typeof msg.correo === "string") {
-      LOG("recibido tg-enviar:", msg.correo, "switchTo:", msg.switchTo || "(ninguno)");
-      enviarYLeer(msg.correo, msg.switchTo)
+      LOG("recibido tg-enviar:", msg.correo, "switchTo:", msg.switchTo || "(ninguno)", "plataforma:", msg.plataforma || "(ninguna)");
+      enviarYLeer(msg.correo, msg.switchTo, { plataforma: msg.plataforma || null, idConsulta: msg.idConsulta || null })
         .then((r) => { LOG("resultado:", r); sendResponse(r); })
         .catch((e) => { LOG("error:", e); sendResponse({ ok: false, error: String(e) }); });
       return true; // respuesta asíncrona

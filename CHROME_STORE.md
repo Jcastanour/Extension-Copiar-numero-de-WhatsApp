@@ -131,12 +131,13 @@ Marcar en el Dashboard: recopila *Website content* y *Personal communications*
 
 ## 5. Política de Privacidad (texto actualizado — reemplaza el anterior)
 
-> Pegar tal cual en el Google Doc de la política. Frente a la v1.1.0 cambian: la
-> fecha, el punto 1 (ahora también se lee el nombre de usuario) y el punto 3, que
-> es nuevo.
+> Pegar tal cual en el Google Doc de la política. Frente a la v1.5.0 cambian: la
+> fecha, el punto 2 (ajustes nuevos: modo por proveedor e ID de consulta), el
+> punto 5 (el bot de Storetools pide plataforma e ID), el punto 6 (los dos
+> servicios nuevos) y el punto 7 (los dos hosts nuevos).
 
 **Política de Privacidad — Extensión "Copiar número de WhatsApp"**
-Última actualización: 9 de agosto de 2026
+Última actualización: 2 de noviembre de 2026
 
 Esta Política de Privacidad describe cómo la extensión de Chrome "Copiar número de
 WhatsApp" (la "Extensión") maneja la información del usuario, conforme a las
@@ -156,9 +157,11 @@ pestañas.
 
 **2. Almacenamiento local**
 La configuración del usuario (URL del backend, clave de API, estado y posición del
-panel, y los ajustes de los bots de Telegram) se guarda exclusivamente de forma
-local en el navegador mediante `chrome.storage.local`. No se almacena en servidores
-de terceros.
+panel, los ajustes de los bots de Telegram, el modo elegido para cada proveedor
+—bot de Telegram o consulta directa a su servicio— y el identificador de consulta
+del servicio Storetools que el propio usuario escribe) se guarda exclusivamente de
+forma local en el navegador mediante `chrome.storage.local`. No se almacena en
+servidores de terceros.
 
 **3. Datos que introduce el propio usuario**
 Cuando WhatsApp Web no muestra el número de un contacto (por ejemplo, contactos que
@@ -180,7 +183,9 @@ caducidad automática, únicamente para que siga disponible al cambiar de pesta�
 Si el usuario habilita la función y pulsa "Pedir código", la Extensión abre o
 enfoca Telegram Web (web.telegram.org), escribe en el chat del bot del proveedor el
 correo de la cuenta seleccionada y lee la respuesta del bot para copiar el código de
-verificación al portapapeles. Esta interacción ocurre dentro de la sesión de
+verificación al portapapeles. Con el bot del proveedor Storetools, además, elige la
+plataforma en el menú del bot y, si el bot lo pide, escribe el identificador de
+consulta guardado en Ajustes. Esta interacción ocurre dentro de la sesión de
 Telegram del propio usuario; la Extensión no almacena ni transmite esas
 conversaciones a terceros.
 
@@ -212,7 +217,7 @@ publicado en la ficha de la Chrome Web Store.
 
 ---
 
-## 6. Formulario de Privacidad — textos listos para pegar
+## 6. Formulario de Privacidad — textos listos para pegar (máx. 1000 caracteres por campo)
 
 > **Para la v1.6.0 sí hay que tocar el formulario**: dos hosts nuevos
 > (`storetools.co` y `api.fastcodemanager.com`). Las casillas de uso de datos y
@@ -221,7 +226,7 @@ publicado en la ficha de la Chrome Web Store.
 > sección 5, porque el formulario certifica que coincide con la política publicada.
 
 **Descripción de un solo propósito**
-> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual (su número de teléfono y, si existe, su nombre de usuario) y muestra en un panel las cuentas asociadas a ese número, consultándolas en el backend del propietario mediante una clave de API. Permite copiar al portapapeles el número, el nombre de usuario o el correo, y escribir y normalizar un número a mano cuando WhatsApp no lo muestra, guardándolo localmente para ese chat. De forma opcional solicita códigos de verificación a los bots de los proveedores en Telegram Web y copia el código. Para las cuentas de Netflix obtiene el código de verificación consultando un servicio del propietario que lee el buzón del negocio, sin abrir Telegram. Incluye además una utilidad local que decodifica los códigos de recarga que el proveedor entrega codificados, sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
+> Herramienta de productividad para soporte de cuentas de streaming. Desde WhatsApp Web identifica el contacto del chat actual y muestra en un panel sus cuentas, consultándolas en el backend del propietario con una clave de API. Permite copiar el número, el nombre de usuario o el correo, y escribir un número a mano cuando WhatsApp no lo muestra. Obtiene códigos de verificación de las cuentas: de los bots de los proveedores en Telegram Web, del servicio propio para Netflix o, si el usuario lo activa en Ajustes, del servicio de códigos del proveedor (Storetools y Digital KH). Incluye una utilidad local que decodifica códigos de recarga sin enviarlos a ningún servidor. Todas las acciones las inicia el usuario.
 
 **Justificación de activeTab**
 > Se usa 'activeTab' para actuar sobre la pestaña actual cuando el usuario invoca la extensión (icono o atajo de teclado), leyendo la información necesaria en ese momento sin requerir acceso permanente a todas las pestañas, lo que protege la privacidad del navegador.
@@ -233,14 +238,13 @@ publicado en la ficha de la Chrome Web Store.
 > Se usa 'clipboardWrite' para copiar al portapapeles del sistema el número extraído o el código de verificación, de modo que el usuario pueda pegarlo inmediatamente en sus programas.
 
 **Justificación de storage**
-> Se usa 'storage' (chrome.storage.local) para guardar localmente en el navegador la configuración del usuario: la URL del backend, la clave de API, el estado y la posición del panel, y los nombres de los bots de Telegram. También guarda los números de teléfono que el propio usuario escribe cuando WhatsApp no los muestra, asociados a su chat, para no volver a pedírselos. No se guarda en servidores de terceros.
+> Se usa 'storage' (chrome.storage.local) para guardar localmente la configuración del usuario: URL del backend, clave de API, estado y posición del panel, nombres de los bots de Telegram, el modo elegido para pedir el código a cada proveedor y el identificador de consulta de Storetools que el usuario escribe. También guarda los números que el usuario teclea cuando WhatsApp no los muestra, para no volver a pedírselos. Nada de esto se guarda en servidores de terceros.
 
 **Justificación de tabs**
 > Se usa 'tabs' para localizar, abrir o enfocar la pestaña de Telegram Web y enrutar la solicitud de código al bot del proveedor correcto, además de detectar cuándo terminó de cargar. No se inspecciona el contenido de pestañas ajenas a esta función.
 
 **Justificación de Permiso de host**
-> web.whatsapp.com: leer el número, el nombre y el nombre de usuario del chat visible, y mostrar el panel.
-> codigos.elixircuentas.com: consultar el servicio del propietario que devuelve el código de verificación de Netflix asociado al correo de una cuenta del negocio. storetools.co y api.fastcodemanager.com: consultar, solo si el usuario lo activa en Ajustes, el servicio del proveedor correspondiente que devuelve el código de verificación asociado al correo de una cuenta del negocio, en lugar de pedirlo a su bot de Telegram. web.telegram.org: automatizar la solicitud de códigos de verificación a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario que devuelve las cuentas asociadas al número. Cada host se declara explícitamente para limitar la acción de la extensión a esos dominios.
+> web.whatsapp.com: leer el número, el nombre y el usuario del chat visible, y mostrar el panel. web.telegram.org: automatizar la solicitud de códigos a los bots de los proveedores. elixircuentas.com (y elixircuentas-test.fly.dev en pruebas): consultar la API del propietario con las cuentas asociadas al número. codigos.elixircuentas.com: obtener del servicio del propietario el código de verificación de Netflix de una cuenta del negocio. storetools.co y api.fastcodemanager.com: solo si el usuario lo activa en Ajustes, obtener del servicio del proveedor el código de verificación de una cuenta del negocio, en lugar de pedirlo a su bot. Cada host se declara para limitar la extensión a esos dominios.
 
 **¿Usas código remoto?** → No.
 
@@ -266,18 +270,10 @@ publicado en la ficha de la Chrome Web Store.
 **Descripción detallada**
 > Herramienta interna para el equipo de Elixir Cuentas.
 >
-> Estando en una conversación de WhatsApp Web, un clic en el botón flotante
-> identifica al contacto y muestra su ficha: nombre, la secuencia de días de cobro
-> que debe llevar su contacto de Google, sus cuentas activas con vencimiento y
-> precio, y avisos si tiene una garantía pendiente o notas importantes.
+En una conversación de WhatsApp Web, un clic en el botón flotante identifica al contacto y muestra su ficha: nombre, secuencia de días de cobro, cuentas activas con vencimiento y precio, y avisos de garantía o notas importantes.
 >
-> Desde ahí se copia con un clic el número, el correo de la cuenta, o el correo y
-> la contraseña juntos para entrar de un solo pegado. Para las cuentas de Netflix
-> obtiene el código de verificación al instante; para el resto de proveedores lo
-> solicita a su bot de Telegram.
+Con un clic se copia el número, el correo de la cuenta, o el correo y la contraseña juntos. Para Netflix obtiene el código de verificación al instante. Para los demás proveedores lo pide a su bot de Telegram o, si se elige en Ajustes para cada proveedor, directamente a su servicio de códigos.
 >
-> El botón flotante se coloca donde convenga, se minimiza, y se apaga por completo
-> desde el popup si se prefiere trabajar solo con los atajos de teclado.
+El botón se coloca donde convenga, se minimiza y se apaga desde el popup.
 >
-> Requiere una cuenta y una clave de API de Elixir Cuentas: sin ellas la extensión
-> no consulta nada.
+Requiere una cuenta y una clave de API de Elixir Cuentas: sin ellas no consulta nada.

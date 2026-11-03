@@ -75,19 +75,25 @@
          contacto, que es donde mucha gente la deja. */
       .launcher.barra {
         width:auto; max-width:260px; height:34px; border-radius:11px;
-        padding:0 11px; gap:7px; font-size:15px;
+        padding:0 11px; gap:7px; font-size:15px; line-height:1;
         justify-content:flex-start; overflow:hidden;
       }
+      /* El rayo es un emoji con métrica vertical propia: en su propia caja
+         centrada no empuja la línea base del nombre y los D. Los tres trozos
+         llevan line-height:1 para que el centrado del flex sea el de verdad. */
+      .launcher.barra .b-ray { display:flex; align-items:center; line-height:1; flex:none; }
       .launcher.barra .b-nom {
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-        font-size:12.5px; font-weight:700; white-space:nowrap;
+        font-size:12.5px; font-weight:700; line-height:1; white-space:nowrap;
         overflow:hidden; text-overflow:ellipsis;
       }
       .launcher.barra .b-ds {
         font-family:ui-monospace,Menlo,monospace; font-size:12px; font-weight:700;
-        color:#f5f3ff; white-space:nowrap;
+        line-height:1; color:#f5f3ff; white-space:nowrap;
       }
-      .launcher.barra .alerta { color:#fecaca; font-size:13px; }
+      .launcher.barra .alerta { color:#fecaca; font-size:13px; line-height:1; }
+      /* Buscando: se conserva lo anterior atenuado, igual que hace el chip. */
+      .launcher.barra.apagado { opacity:.6; }
       /* Chip: la identidad del cliente, siempre a la vista. Mismo truco de
          posicionamiento que la burbuja (fixed en 0,0 + transform) para que
          arrastrar no provoque layout. */
@@ -769,6 +775,9 @@
     if (!d || d.estado === "vacio" || d.estado === "sin-chat" ||
         d.estado === "grupo" || d.estado === "sin-numero" || d.estado === "error") {
       chipConContenido = false;
+      // La forma barra pinta el nombre DENTRO del flotante: si no se repinta
+      // aquí, el cliente anterior se queda en la barra al cambiar de chat.
+      pintarLauncher();
       aplicarEstadoUI();
       return;
     }
@@ -779,6 +788,7 @@
       // No se vacía el chip mientras busca: parpadearía en cada cambio de chat.
       // Se conserva lo anterior, atenuado, hasta que llegue lo nuevo.
       if (chipConContenido) elChip.classList.add("apagado");
+      if (forma === "barra") elLauncher.classList.add("apagado");
       aplicarEstadoUI();
       return;
     }
@@ -812,17 +822,19 @@
   // En forma "barra" el contenido del chip va DENTRO del flotante, así que el
   // launcher se repinta cada vez. En "burbuja" se queda con el rayo de siempre.
   function pintarLauncher() {
+    elLauncher.classList.remove("apagado");
     if (forma !== "barra") {
       if (elLauncher.textContent !== "⚡") elLauncher.textContent = "⚡";
       return;
     }
     const d = datosChat;
     const util = d && d.estado === "ok" && d.found;
-    if (!util) { elLauncher.innerHTML = "⚡"; return; }
+    const rayo = `<span class="b-ray">⚡</span>`;
+    if (!util) { elLauncher.innerHTML = rayo; return; }
     const alerta = (d.notas.length || d.garantia || tieneCuentaCaida(d))
       ? `<span class="alerta">●</span>` : "";
     elLauncher.innerHTML =
-      "⚡" +
+      rayo +
       `<span class="b-nom">${escapeHtml(d.nombre || "Cliente")}</span>` +
       (d.dStr ? `<span class="b-ds">${escapeHtml(d.dStr)}</span>` : "") +
       alerta;
